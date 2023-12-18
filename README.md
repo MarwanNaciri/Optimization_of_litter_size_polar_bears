@@ -1,13 +1,13 @@
 # Optimization_of_litter_size_in_polar_bears
 Data and code for the manuscript on the optimization of litter size in polar bears
 
-The Rmardown file PA_CR.Rmd contains the full workflow of the analysis starting from the clean capture dataset, and ending with the figures presented in the main text. This involves:
+The Rmardown file PA_CR.Rmd contains the full workflow of the analysis starting from the clean capture dataset, and ending with the figures presented in the main text. Specifically, the workflow involves:
 - building the model in Bayesian framework
-- generating the data for the model
+- generating the data and intial values for the model
 - running the model
-- checking the output (trace_plots & Rhat)
-- compute quantities of interest
-- quantify the level of evidence for effects
+- checking the output (trace plots & Rhat)
+- computing quantities of interest (predictions, observation corrected for the effect of some variables)
+- quantifying the level of evidence for effects
 - plotting the main figures.
 
 The model takes several hours to run (~18h on my machine). The output of the model is therefire included in this repository.
