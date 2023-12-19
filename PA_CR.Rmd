@@ -5,20 +5,17 @@ date: "2023-12-13"
 output: pdf_document
 ---
 
+This code generates the results and the main figures presenter in the manuscript “Offspring number, size, and survival: state-dependent optimization of litter size in a long-lived capital breeder” *Ecological monographs*
+
+Marwan Naciri, Marlène Gamelon, Jon Aars, Marie-Anne Blanchet, and Sarah Cubaynes
+
 ```{r setup, include=FALSE, echo=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
 library(tidyverse)
 library(nimble)
 library(patchwork)
 library(cowplot)
-```
 
-This code generates the results and the main figures presenter in the manuscript “Offspring number, size, and survival: state-dependent optimization of litter size in a long-lived capital breeder” *Ecological monographs*
-
-Marwan Naciri, Marlène Gamelon, Jon Aars, Marie-Anne Blanchet, and Sarah Cubaynes
-
-
-```{r}
 # Custom functions used in this code 
 
 check_convergence <- function(params.plot, nimble_output) {
@@ -301,9 +298,9 @@ PA_CR <- nimbleCode({
       # Recapture
       logit(p[i, t]) <- lambda[1] +
         lambda[2] * (mSpUnk[i] * (1 - Sex[i]) +                                                 # all NA females
-                       mSpUnk[mother[i]] * Sex[i] * (Age0[i, t+1] + Age1[i, t+1]+ Age2[i, t+1])) + # all male dependent cubs of NA females
+                       mSpUnk[mother[i]] * Sex[i] * (Age1[i, t+1]+ Age2[i, t+1])) + # all male dependent cubs of NA females
         lambda[3] * (mSpPel[i] * (1 - Sex[i]) +                                                 # all pelagic females
-                       mSpPel[mother[i]] * Sex[i] * (Age0[i, t+1] + Age1[i, t+1] + Age2[i, t+1])) + # all male dependent cubs of pelagic females
+                       mSpPel[mother[i]] * Sex[i] * (Age1[i, t+1] + Age2[i, t+1])) + # all male dependent cubs of pelagic females
         lambda[4] * Sex[i] * (Age3_4[i, t+1] + Age5_19[i, t+1] + Age20[i, t+1]) +    
         omega[t]
     }
@@ -883,6 +880,9 @@ ggplot(data = caterpillar %>% filter(submodel == "Cub survival"),
 ## 1. Predict number of surviving CoYs by litter size and maternal age
 
 ```{r}
+res <- rbind(fit_PA_CR$samples$chain1,
+             fit_PA_CR$samples$chain2)
+
 girth <- array(NA, dim = c(dim(res)[1], 3, 3),
                dimnames = list(1:dim(res)[1], c("with singleton", "with twin", "with triplet"), c("young", "middle-aged", "old")))
 cub_mass <- array(NA, dim = c(dim(res)[1], 3, 3),
