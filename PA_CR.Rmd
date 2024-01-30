@@ -5,9 +5,9 @@ date: "2023-12-13"
 output: pdf_document
 ---
 
-This code generates the results and the main figures presenter in the manuscript “Offspring number, size, and survival: state-dependent optimization of litter size in a long-lived capital breeder” *Ecological monographs*
+This code generates the results and the main figures presented in the manuscript “Offspring number, size, and survival: state-dependent optimization of litter size in a long-lived capital breeder” *Ecological monographs*
 
-Marwan Naciri, Marlène Gamelon, Jon Aars, Marie-Anne Blanchet, and Sarah Cubaynes
+Marwan Naciri, Jon Aars, Magnus Anderson, Marie-Anne Blanchet, Andrew E. Derocher, Marlène Gamelon, Øystein Wiig, and Sarah Cubaynes
 
 ```{r setup, include=FALSE, echo=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
