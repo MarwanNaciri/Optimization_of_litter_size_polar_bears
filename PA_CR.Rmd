@@ -5,7 +5,7 @@ date: "2023-12-13"
 output: pdf_document
 ---
 
-This code generates the results and the main figures presented in the manuscript “Offspring number, size, and survival: state-dependent optimization of litter size in a long-lived capital breeder” *Ecological monographs*
+This code generates the results and the main figures presented in the manuscript “Offspring number, size, and survival: state-dependent optimization of litter size in a long-lived capital breeder” *Ecosphere*
 
 Marwan Naciri, Jon Aars, Magnus Anderson, Marie-Anne Blanchet, Andrew E. Derocher, Marlène Gamelon, Øystein Wiig, and Sarah Cubaynes
 
@@ -20,14 +20,14 @@ library(cowplot)
 
 check_convergence <- function(params.plot, nimble_output) {
   # Process Nimble output into dataframe
-  chain1 <- data.frame(nimble_output[["samples"]][["chain1"]]) %>%
+  chain1 <- data.frame(nimble_output$chain1) %>%
     dplyr::select(any_of(params.plot)) %>%
     mutate(chain = "1",
-           iteration = seq(1, dim(nimble_output[["samples"]][["chain1"]])[1], by = 1))
-  chain2 <- data.frame(nimble_output[["samples"]][["chain2"]]) %>%
+           iteration = seq(1, dim(nimble_output$chain1)[1], by = 1))
+  chain2 <- data.frame(nimble_output$chain2) %>%
     dplyr::select(any_of(params.plot)) %>%
     mutate(chain = "2",
-           iteration = seq(1, dim(nimble_output[["samples"]][["chain2"]])[1], by = 1))
+           iteration = seq(1, dim(nimble_output$chain2)[1], by = 1))
   chains <- rbind(chain1, chain2) 
   
   chains_l <- pivot_longer(chains, cols = any_of(params.plot), names_to = "parameter") %>%
@@ -42,49 +42,51 @@ check_convergence <- function(params.plot, nimble_output) {
     group_by(parameter, chain) %>%
     mutate(rm = cumsum(value)/iteration)
   
-  # Plot the MCMC chains
   trace.plots <- ggplot(data = chains_l, 
                         aes(x = iteration, y = value, color = chain)) +
     geom_line(alpha = 0.5) +
     labs(y = "trace") +
+    theme_bw() +
     theme(legend.position = "none") +
     facet_wrap( ~ parameter,
                 scales = "free",
                 ncol = 1)
-  # Plot the density of the posteriors
+  
   density.plots <- ggplot(data = chains_l, 
                           aes(x = value, color = chain, fill = chain)) +
     geom_vline(xintercept = 0) +
     geom_density(alpha = 0.25) +
     
     labs(x = "density") +
+    theme_bw() +
     theme(legend.position = "none") +
     facet_wrap( ~ parameter,
                 scales = "free_y",
                 ncol = 1)
-  # Plot the running mean
+  
   running.mean.plot <- ggplot(param.running.mean, 
                               aes(x = iteration, y = rm, color = chain)) + 
     geom_line() + 
     geom_hline(aes(yintercept = m), param.mean,
                colour = "black", alpha = 0.5) + 
-    ylab("running Mean") +
-    facet_grid(parameter ~ chain, scales = "free")
+    theme_bw() +
+    theme(legend.position = "none") +
+    ylab("running mean") +
+    facet_grid(parameter ~ ., scales = "free")
   
-  # Gather all the plots
-  diagnostic_plot <- plot_grid(trace.plots,
-                               density.plots, 
-                               running.mean.plot,
-                               ncol = 3, nrow = 1)
+  # Plot all the plots together
+  diagnostic_plot <- trace.plots + density.plots + running.mean.plot
+  
   return(diagnostic_plot)
 }
+
 
 
 get_Rhat <- function(nimble_output, params) {
   Rhat <- NULL
   for (k in 1:length(params)) {
-    posterior <- cbind(nimble_output$samples$chain1[, params[k]],
-                       nimble_output$samples$chain2[, params[k]])
+    posterior <- cbind(nimble_output$chain1[, params[k]],
+                       nimble_output$chain2[, params[k]])
     Rhat[k] <- rstan::Rhat(posterior)
     
   }
@@ -169,9 +171,7 @@ PA_CR <- nimbleCode({
   }
   
   # Survival
-  theta[1] ~ dnorm(0, sd = 1.5)
-  theta[2] ~ dnorm(0, sd = 1)
-  for (i in 3:n_coef_phi) {
+  for (i in 1:n_coef_phi) {
     theta[i] ~ dnorm(0, sd = 1.5)
   }
   
@@ -217,14 +217,18 @@ PA_CR <- nimbleCode({
       s[k, i] <- q[k, i]/sum(q[k, 1:3])
     }
     
+    LS1[row_litter[k], col_litter[k]] <- 0.5 * (LS[row_litter[k], col_litter[k]] - 2)*(LS[row_litter[k], col_litter[k]] - 3)
+    LS2[row_litter[k], col_litter[k]] <- -1 * (LS[row_litter[k], col_litter[k]] - 1)*(LS[row_litter[k], col_litter[k]] - 3) 
+    LS3[row_litter[k], col_litter[k]] <- 0.5 * (LS[row_litter[k], col_litter[k]] - 1)*(LS[row_litter[k], col_litter[k]] - 2)
+    
     # Girth
     mu_mG[k] <- gamma[1] * mAgeY[row_litter[k], col_litter[k]] +
       gamma[2] * mAgeM[row_litter[k], col_litter[k]] +
       gamma[3] * mAgeO[row_litter[k], col_litter[k]] +
       gamma[4] * mL[row_litter[k], col_litter[k]] +
       gamma[5] * DOY[row_litter[k], col_litter[k]] +
-      gamma[6] * LS2[row_litter[k], col_litter[k]] +
-      gamma[7] * LS3[row_litter[k], col_litter[k]] +
+      gamma[6] * (-1) * (LS[row_litter[k], col_litter[k]] - 1)*(LS[row_litter[k], col_litter[k]] - 3) +
+      gamma[7] * 0.5 * (LS[row_litter[k], col_litter[k]] - 1)*(LS[row_litter[k], col_litter[k]] - 2) +
       gamma[8] * mSpUnk[row_litter[k]] +
       gamma[9] * mSpPel[row_litter[k]] +
       rho[col_litter[k]]
@@ -233,7 +237,7 @@ PA_CR <- nimbleCode({
   
   # Cub mass
   for (k in 1:n_cubs) {
-    
+
     mu_M[k] <- delta[1] * LS1[mother[k], col_cub[k]] * mAgeY[mother[k], col_cub[k]] +
       delta[2] * LS1[mother[k], col_cub[k]] * mAgeM[mother[k], col_cub[k]] +
       delta[3] * LS1[mother[k], col_cub[k]] * mAgeO[mother[k], col_cub[k]] +
@@ -265,7 +269,6 @@ PA_CR <- nimbleCode({
     M[k] ~ dnorm(mu_M[k], sd = sigma_epsilon)
   }
   
-  
   for (i in 1:n_ind) {
     for (t in f[i]:(n_year-1)) {
       # Survival
@@ -275,7 +278,8 @@ PA_CR <- nimbleCode({
         theta[3] * Age0[i, t] * mAgeO[mother[i], t] +
         
         theta[4] * Age0[i, t] * M[i] +
-        theta[5] * Age0[i, t] * (LS2[mother[i], t] + LS3[mother[i], t]) +
+        theta[5] * Age0[i, t] * (-1 * (LS[mother[i], t] - 1) * (LS[mother[i], t] - 3) +  # LS2
+        0.5 * (LS[mother[i], t] - 1) * (LS[mother[i], t] - 2)) +  # LS3
         theta[6] * Age0[i, t] * mL[mother[i], t] +
         theta[7] * Age0[i, t] * mG[mother[i], t] +
         theta[8] * Age0[i, t] * DOY[mother[i], t] +
@@ -284,21 +288,20 @@ PA_CR <- nimbleCode({
         theta[11] * Age0[i, t] * mSpPel[mother[i]] +
         
         theta[12] * Age1[i, t] +
-        theta[13] * Age2[i, t] +
-        theta[14] * Age3_4[i, t] +
-        theta[15] * Age5_19[i, t] +
-        theta[16] * Age20[i, t] +
+        theta[13] * (Age2[i, t] + Age3_4[i, t]) +
+        theta[14] * Age5_19[i, t] +
+        theta[15] * Age20[i, t] +
         
-        theta[17] * (1 - Age0[i, t]) * Sex[i] +                                # Effect of sex = male for individuals older than cubs
-        theta[18] * ((1 - Age0[i, t]) * (1 - Sex[i]) * mSpUnk[i] +          # Effect of space use = NA for females >0yr 
+        theta[16] * (1 - Age0[i, t]) * Sex[i] +                                # Effect of sex = male for individuals older than cubs
+        theta[17] * ((1 - Age0[i, t]) * (1 - Sex[i]) * mSpUnk[i] +          # Effect of space use = NA for females >0yr 
                        Age1[i, t] * Sex[i] * mSpUnk[mother[i]]) +             # Effect of maternal space use = NA for male yearlings 
-        theta[19] * ((1 - Age0[i, t]) * (1 - Sex[i]) * mSpPel[i] +     # Effect of space use = pelagic for females >0yr
+        theta[18] * ((1 - Age0[i, t]) * (1 - Sex[i]) * mSpPel[i] +     # Effect of space use = pelagic for females >0yr
                        Age1[i, t] * Sex[i] * mSpPel[mother[i]])          # Effect of maternal space use = pelagic for male yearlings 
       
       # Recapture
       logit(p[i, t]) <- lambda[1] +
         lambda[2] * (mSpUnk[i] * (1 - Sex[i]) +                                                 # all NA females
-                       mSpUnk[mother[i]] * Sex[i] * (Age1[i, t+1]+ Age2[i, t+1])) + # all male dependent cubs of NA females
+                       mSpUnk[mother[i]] * Sex[i] * (Age1[i, t+1] + Age2[i, t+1])) + # all male dependent cubs of NA females
         lambda[3] * (mSpPel[i] * (1 - Sex[i]) +                                                 # all pelagic females
                        mSpPel[mother[i]] * Sex[i] * (Age1[i, t+1] + Age2[i, t+1])) + # all male dependent cubs of pelagic females
         lambda[4] * Sex[i] * (Age3_4[i, t+1] + Age5_19[i, t+1] + Age20[i, t+1]) +    
@@ -321,82 +324,55 @@ PA_CR <- nimbleCode({
     } # t
   } # i
 })
+
 ```
-
-Here, I use a relatively informative prior for theta[2] (survival of cubs of middle-aged females) because otherwise, I get unrealistically high survival (mean = 0.77). This informative prior is N(0, 1), to compare to the less informative N(0, 1.5):
-
-```{r, message = F, warning = F, fig.width = 9, fig.height = 4}
-ggplot(data = data.frame(x = plogis(rnorm(15000, mean = 0, sd = 1))),
-       aes(x = x)) +
-  geom_histogram(fill = "grey75", alpha = 0.75) +
-  theme_bw() +
-  labs(x = "cub survival", subtitle = "N(0, 1)") +
-ggplot(data = data.frame(x = plogis(rnorm(15000, mean = 0, sd = 1.5))),
-       aes(x = x)) +
-  geom_histogram(fill = "grey75", alpha = 0.75) +
-  theme_bw() +
-  labs(x = "cub survival", subtitle = "N(0, 1.5)")
-```
-
 
 ## 2. Process the data
 
 ```{r}
-CR_data <- read_csv("data/data_PA_CR.csv",
-                    show_col_types = F)
-data_cub <- read_csv("data/data_cub_PA_CR.csv",
-                    show_col_types = F)
-
-n_ind <- length(unique(CR_data$ID_NR))
-
-years_obs <- unique(CR_data$year)
-year <- as.character(min(years_obs):max(years_obs))
-n_year <- length(year)
+CR_data <- read_csv("data/data_PA_CR.csv", show_col_types = F)  %>%
+  arrange(age_for_analyses, ID_NR, year) # Sort by age at first capture, to have cubs first in the matrix of capture histories 
+data_cub <- read_csv("data/data_cub_PA_CR.csv", show_col_types = F)
 
 # Generate the capture histories
-capt_hist_1 <- reshape2::dcast(CR_data, ID_NR ~ year, fun.aggregate = length, fill = 0)
+CH <- matrix(data = 0, 
+             nrow = length(unique(CR_data$ID_NR)), 
+             ncol = length(min(CR_data$year):max(CR_data$year)),
+             dimnames = list(unique(CR_data$ID_NR),
+                             min(CR_data$year):max(CR_data$year)))
 
-# The column for 2020 is missing since there were no captures this year. Let's add it
-capt_hist_2 <- cbind(capt_hist_1[, 1:29], rep(0, times = n_ind), capt_hist_1[, 30:32])
-colnames(capt_hist_2)[30] <- "2020"
-
-# Get the age at first capture of each
-age_first <- CR_data %>%
-  group_by(ID_NR) %>%
-  filter(rank(age_for_analyses, ties.method = "first") == 1) %>%
-  dplyr::select(ID_NR, age_first = age_for_analyses)
-
-# Sort by age at first capture, to have cubs first
-capt_hist_2_df <- as.data.frame(capt_hist_2) %>%
-  left_join(x = .,
-            y = age_first,
-            by = "ID_NR") %>%
-  arrange(age_first, ID_NR)
-
-capt_hist_3 <- as.matrix(capt_hist_2_df %>% dplyr::select(-age_first))
-rm(capt_hist_1, capt_hist_2)
-
-# Remove column with IDs
-capt_hist <- capt_hist_3[, -1]
+for (k in 1:nrow(CR_data)) {
+  CH[which(rownames(CH) == CR_data$ID_NR[k]), 
+     which(colnames(CH) == as.character(CR_data$year[k]))] <- 1
+}
 ```
 
 
 ```{r}
+n_year <- ncol(CH)
+
 # Occasion of first capture
 f <- NULL
-for (i in 1:n_ind){
-  f[i] <-  which(capt_hist[i, ] == 1)[1]
+for (i in 1:nrow(CH)) {
+  f[i] <-  which(CH[i, ] == 1)[1]
+}
+# Replace ones by NAs before first capture
+for (i in 1:nrow(CH)){
+  if (f[i] == 1) next
+  CH[i, 1:(f[i]-1)] <- NA
 }
 
-# Create matrices for age group
-AGE <- mAgeY <- mAgeM <- mAgeO <- Age0 <- Age1 <- Age2 <- Age3_4 <- Age5_19 <- Age20 <- matrix(NA, ncol = dim(capt_hist)[2], nrow = dim(capt_hist)[1])
-colnames(Age0) <- colnames(Age1) <- colnames(Age2) <- colnames(Age3_4) <- colnames(Age5_19) <- colnames(Age20) <- year
 
-for (i in 1:dim(capt_hist)[1]){
-  ID_i = capt_hist_3[i, 1]
-  year_first = colnames(capt_hist)[f[i]]
+# Create matrices for age group
+AGE <- mAgeY <- mAgeM <- mAgeO <- Age0 <- Age1 <- Age2 <- Age3_4 <- Age5_19 <- Age20 <- 
+  matrix(NA, nrow = nrow(CH), ncol = ncol(CH),
+         dimnames = list(rownames(CH), colnames(CH)))
+
+for (i in 1:nrow(CH)){
+  ID_i = rownames(CH)[i]
+  year_first = colnames(CH)[f[i]]
   age <- CR_data$age_for_analyses[ which(CR_data$ID_NR == ID_i & CR_data$year == year_first) ]
-  for (t in f[i]:dim(capt_hist)[2]) {
+  for (t in f[i]:ncol(CH)) {
     mAgeY[i, t] <- ifelse(age %in% c(5:9), 1, 0)
     mAgeM[i, t] <- ifelse(age %in% c(10:15), 1, 0)
     mAgeO[i, t] <- ifelse(age %in% c(16:40), 1, 0)
@@ -415,23 +391,23 @@ for (i in 1:dim(capt_hist)[1]){
 
 
 # Create matrix with whether a female has a cub litter, litter size, maternal length and maternal girth
-has_a_litter <- matrix(data = 0, nrow = dim(capt_hist)[1], ncol = dim(capt_hist)[2],
-                       dimnames = list(1:dim(capt_hist)[1], 1992:2023))
-Length <- Girth <- matrix(data = NA, nrow = dim(capt_hist)[1], ncol = dim(capt_hist)[2],
-                        dimnames = list(1:dim(capt_hist)[1], 1992:2023))
-LS <- LS1 <- LS2 <- LS3 <- matrix(data = 0, nrow = dim(capt_hist)[1], ncol = dim(capt_hist)[2],
-                                  dimnames = list(1:dim(capt_hist)[1], 1992:2023))
-
-for (i in 1:nrow(CR_data)) {
-  if (CR_data$cub_status_complete[i] %in% c("c")) {
-    has_a_litter[which(capt_hist_3[, 1] == CR_data$ID_NR[i]), as.character(CR_data$year[i])] <- 1
+has_a_litter <- LS <- LS1 <- LS2 <- LS3 <- matrix(0, nrow = nrow(CH), ncol = ncol(CH),
+                                                  dimnames = list(rownames(CH), colnames(CH)))
+Length <- Girth <- matrix(NA, nrow = nrow(CH), ncol = ncol(CH),
+                          dimnames = list(rownames(CH), colnames(CH)))
+for (k in 1:nrow(CR_data)) {
+  i <- which(rownames(CH) == CR_data$ID_NR[k])
+  t <- which(colnames(CH) == as.character(CR_data$year[k]))
+  
+  if (CR_data$cub_status_complete[k] %in% c("c")) {
+    has_a_litter[i, t] <- 1
     
-    Length[which(capt_hist_3[, 1] == CR_data$ID_NR[i]), as.character(CR_data$year[i])] <- CR_data$s_length[i]
-    Girth[which(capt_hist_3[, 1] == CR_data$ID_NR[i]), as.character(CR_data$year[i])] <- CR_data$girth[i]
-    LS[which(capt_hist_3[, 1] == CR_data$ID_NR[i]), as.character(CR_data$year[i])] <- CR_data$cub_number[i]
-    LS1[which(capt_hist_3[, 1] == CR_data$ID_NR[i]), as.character(CR_data$year[i])] <- ifelse(CR_data$cub_number[i] == 1, 1, 0)
-    LS2[which(capt_hist_3[, 1] == CR_data$ID_NR[i]), as.character(CR_data$year[i])] <- ifelse(CR_data$cub_number[i] == 2, 1, 0)
-    LS3[which(capt_hist_3[, 1] == CR_data$ID_NR[i]), as.character(CR_data$year[i])] <- ifelse(CR_data$cub_number[i] == 3, 1, 0)
+    Length[i, t] <- CR_data$s_length[k]
+    Girth[i, t] <- CR_data$girth[k]
+    LS[i, t] <- CR_data$cub_number[k]
+    LS1[i, t] <- ifelse(CR_data$cub_number[k] == 1, 1, 0)
+    LS2[i, t] <- ifelse(CR_data$cub_number[k] == 2, 1, 0)
+    LS3[i, t] <- ifelse(CR_data$cub_number[k] == 3, 1, 0)
   }
 }
 mL <- (Length - mean(Length, na.rm = T))/sd(Length, na.rm = T)
@@ -439,10 +415,12 @@ mL[is.na(mL)] <- 0
 mG <- (Girth - mean(Girth, na.rm = T))/sd(Girth, na.rm = T)
 mG[is.na(mG)] <- 0
 
-row_litter <- NULL
-col_litter <- NULL
-for (i in 1:dim(has_a_litter)[1]) {
-  for (t in 1:dim(has_a_litter)[2]) {
+
+# Get the rows and columns in the capture history matrix that correspond to a 
+# a female captured with a litter-of-the-year
+row_litter <- col_litter <- NULL
+for (i in 1:nrow(CH)) {
+  for (t in 1:ncol(CH)) {
     if (has_a_litter[i, t] == 1) {
       row_litter <- c(row_litter, i)
       col_litter <- c(col_litter, t)
@@ -467,49 +445,45 @@ n_cohort <- length(unique(cohort))
 
 
 # Create matrices with cub mass, litter size and line of mother
-mass_cub <- LS_focal <- matrix(data = 0, nrow = dim(capt_hist)[1], ncol = dim(capt_hist)[2])
-ID_mother <- rep(NA, times = dim(capt_hist)[1])
-mother <- rep(411, times = dim(capt_hist)[1]) # I use 411 because there is no NA on that line
-# in age. This way, there won't be NAs in the model
-for (i in 1:dim(capt_hist)[1]) {
-  # Get age at first capture
-  if (Age0[i, f[i]] == 1) {
-    ID_i = capt_hist_3[i, 1]
-    mass_cub[i, f[i]] <- CR_data$mass[ which(CR_data$ID_NR == ID_i & CR_data$age_for_analyses == 0) ]
-    LS_focal[i, f[i]] <- CR_data$litter_size[ which(CR_data$ID_NR == ID_i & CR_data$age_for_analyses == 0) ] # There are 2 NAs in the LS_focal matrix. They correspond to the two cubs (23263 & 23264) that were captured with the adopted third cub (23231)
-    #  Mother
-    ID_mother[i] <- CR_data$ID_mat[ which(CR_data$ID_NR == ID_i & CR_data$age_for_analyses == 0) ]
-    mother[i] <- which(capt_hist_3[, 1] == ID_mother[i])
-  }
+mass_cub <- LS_focal <- matrix(0, nrow = nrow(CH), ncol = ncol(CH),
+                               dimnames = list(rownames(CH), colnames(CH)))
+ID_mother <- rep(NA, times = nrow(CH))
+mother <- rep(423, times = nrow(CH)) # I use 423 because there is no NA on that line
+# in age (matrix). This way, there won't be NAs in the model
+for (k in 1:nrow(data_cub)) {
+  i <- which(rownames(CH) == data_cub$ID_NR[k])
+  t <- which(colnames(CH) == as.character(data_cub$year[k]))
+  
+  mass_cub[i, f[i]] <- data_cub$mass[ which(data_cub$ID_NR == rownames(CH)[i]) ]
+  LS_focal[i, f[i]] <- data_cub$litter_size[ which(data_cub$ID_NR == rownames(CH)[i]) ]
+  
+  #  Mother
+  ID_mother[i] <- data_cub$ID_mat[ which(data_cub$ID_NR == rownames(CH)[i]) ]
+  mother[i] <- which(rownames(CH) == ID_mother[i])
 }
-mass_cub_vector <- apply(mass_cub, 1, max)             # vector with the mass of each cub (except cubs that weren't weighed)
+mass_cub_vector <- unname(apply(mass_cub, 1, max))             # vector with the mass of each cub (except cubs that weren't weighed)
 mass_cub_vector[mass_cub_vector == 0] <- NA
 log_mass_cub_vector <- log(mass_cub_vector)
+mean_log_mass <- mean(log_mass_cub_vector, na.rm = T) ; sd_log_mass <- sd(log_mass_cub_vector, na.rm = T)
 M <- as.vector(scale(log_mass_cub_vector))
 M[is.na(M)] <- 0
 
-save(log_mass_cub_vector, 
-     file = "data/log_mass.RData")
-
-LS_cub_focal_vector <- apply(LS_focal, 1, max)
+LS_cub_focal_vector <- unname(apply(LS_focal, 1, max))
 
 
-# Create:
-# - a matrix with the day of capture
-# - vectors withsex and space-use strategy
-DayCapture <- matrix(data = NA, nrow = dim(capt_hist)[1], ncol = dim(capt_hist)[2])
+# Create vectors with sex and space-use strategy
 Sex <- mSpUnk <- mSpPel <- NULL
-for (i in 1:dim(capt_hist)[1]) {
-  ID_i = capt_hist_3[i, 1]
-  Sex[i] <- ifelse(CR_data$sex[which(CR_data$ID_NR == ID_i)][1] %in% "m", 1, 0) # 1 cub with unknown sex, assigned to females.
-  mSpUnk[i] <- ifelse(is.na(CR_data$ecot[which(CR_data$ID_NR == ID_i)][1]), 1, 0)
-  mSpPel[i] <- ifelse(CR_data$ecot[which(CR_data$ID_NR == ID_i)][1] %in% "O", 1, 0)
-  
-  for (t in f[i]:dim(capt_hist)[2]) {
-    if (capt_hist[i, t] %in% 1) {
-      DayCapture[i, t] <- CR_data$day_number[ which(CR_data$ID_NR == ID_i & CR_data$year == (t+1991)) ]
-    }
-  }
+for (i in 1:nrow(CH)) {
+  Sex[i] <- ifelse(CR_data$sex[which(CR_data$ID_NR == rownames(CH)[i])][1] %in% "m", 1, 0) # 1 cub with unknown sex, assigned to females.
+  mSpUnk[i] <- ifelse(is.na(CR_data$ecot[which(CR_data$ID_NR == rownames(CH)[i])][1]), 1, 0)
+  mSpPel[i] <- ifelse(CR_data$ecot[which(CR_data$ID_NR == rownames(CH)[i])][1] %in% "O", 1, 0)
+}
+
+# Create a matrix with the day of capture
+DayCapture <- matrix(data = NA, nrow = nrow(CH), ncol = ncol(CH))
+for (k in 1:nrow(CR_data)) {
+  DayCapture[which(rownames(CH) == CR_data$ID_NR[k]), 
+             which(colnames(CH) == as.character(CR_data$year[k]))] <- CR_data$day_number[k]
 }
 DOY <- scale(DayCapture)
 DOY[is.na(DOY)] <- 0
@@ -517,18 +491,16 @@ DOY[is.na(DOY)] <- 0
 
 # Let's get the coordinates of the cubs
 col_cub <- NULL
-for (i in 1:dim(Age0)[1]) {
-  for (t in 1:dim(Age0)[2]) {
+for (i in 1:nrow(CH)) {
+  for (t in 1:ncol(CH)) {
     if (Age0[i, t] %in% 1) {
       col_cub <- c(col_cub, t)
     }
   }
 }
 
-
-
 # Function to create known states
-# We want ones where we known an individual is alive (between its first and last capture)
+# We want ones where we know an individual is alive (between its first and last capture)
 # and NAs elsewhere. We also need to put an NA in the first capture.
 known.state.cjs <- function(ch) {
   state <- ch
@@ -542,23 +514,24 @@ known.state.cjs <- function(ch) {
   return(state)
 }
 
+
 # Bundle data
 n_coef_mL <- 5
 n_coef_LS <- 12
 n_coef_mG <- 9
 n_coef_M <- 21
-n_coef_phi <- 19
+n_coef_phi <- 18
 n_coef_p <- 4
 
 dat <- list(mL = mL,
             LS = LS,
             mG = mG,
             M = M,
-            y = capt_hist,
-            z = known.state.cjs(capt_hist))
+            y = CH,
+            z = known.state.cjs(CH))
 
 my.constants <- list(n_year = n_year,
-                     n_ind = n_ind,
+                     n_ind = nrow(CH),
                      # Length +++++++++++++++++++++++++++++++++++++
                      n_coef_mL = n_coef_mL,
                      n_litters = length(row_litter),
@@ -576,14 +549,11 @@ my.constants <- list(n_year = n_year,
                      DOY = DOY,
                      # girth +++++++++++++++++++++++++++++++++++++
                      n_coef_mG = n_coef_mG,
-                     LS2 = LS2,
-                     LS3 = LS3,
                      # Cub mass +++++++++++++++++++++++++++++++++
                      n_coef_M = n_coef_M,
                      n_cubs = length(col_cub),
                      col_cub = col_cub,
                      mother = mother,
-                     LS1 = LS1,
                      Sex = Sex,
                      # Survival +++++++++++++++++++++++++++++++++
                      n_coef_phi = n_coef_phi,
@@ -602,7 +572,7 @@ my.constants <- list(n_year = n_year,
 ch.init <- function(ch, f) {
   for (i in 1:dim(ch)[1]) {
     last <- max(which(ch[i, ] == 1))
-    ch[i, 1:last] <- NA # ch[i, 1:f[i]] <- NA
+    ch[i, 1:last] <- NA 
   }
   return(as.matrix(ch))
 }
@@ -626,7 +596,7 @@ inits <- function() list(alpha = rnorm(n_coef_mL, mean = 0, sd = 1),
                          nu = rnorm(n_year, mean = 0, sd = 1),
                          sigma_epsilon = runif(1, min = 0, max = 5),
                          # CR model
-                         z = ch.init(capt_hist, f),
+                         z = ch.init(CH, f),
                          theta = rnorm(n_coef_phi, mean = 0, sd = 1),
                          lambda = rnorm(n_coef_p, mean = 0, sd = 1),
                          omega = rnorm((n_year-1), mean = 0, sd = 1),
@@ -640,29 +610,62 @@ params <- c("alpha", "zeta", "sigma_zeta", "sigma_tau",
             "theta", "lambda", "omega", "sigma_omega")
 ```
 
+## 3. Run the model
 
 ```{r}
-# start <- Sys.time() ; start
-# set.seed(2023)
-# fit_PA_CR <-  nimbleMCMC(code = PA_CR,
-#                                        data = dat,
-#                                        constants = my.constants,
-#                                        inits = inits,
-#                                        monitors = params,
-#                                        thin = 10,
-#                                        niter = 100000,
-#                                        nburnin = 10000,
-#                                        nchains = 2,
-#                                        summary = TRUE,
-#                                        WAIC = TRUE)
+# start <- Sys.time() ; start  # 31h
+# # Create R model
+# inits_values <- inits()
+# PA_CR_R <- nimbleModel(code = PA_CR,
+#                                constants = my.constants,
+#                                data = dat,
+#                                inits = inits_values,
+#                                calculate = FALSE)
+# end <- Sys.time() ; end ; end - start
+# 
+# # Compile model (in C++)
+# PA_CR_C <- compileNimble(PA_CR_R,
+#                                  showCompilerOutput = FALSE)
+# end <- Sys.time() ; end ; end - start
+# 
+# # Configure of MCMC
+# MCMC_conf <- configureMCMC(PA_CR_R,
+#                            monitors = params)
+# 
+# MCMC_conf$removeSamplers(c('theta[1]', 'theta[2]', 'theta[3]', 'theta[4]', 'theta[5]', 'theta[7]', 'theta[8]',
+#                            'theta[12]', 'theta[13]', 
+#                            'theta[14]', 'theta[15]', 'theta[16]', 'theta[17]','theta[18]', 'lambda[2]', 'lambda[3]', 'lambda[4]'))
+# 
+# # Add block sampler (Automated Factor Slice Sampler https://r-nimble.org/better-block-sampling-in-mcmc-with-the-automated-factor-slice-sampler#bib-turek17)
+# MCMC_conf$addSampler(target = c('theta[1]', 'theta[2]', 'theta[3]', 'theta[4]', 'theta[5]', 'theta[7]', 'theta[8]'), type = 'AF_slice')
+# MCMC_conf$addSampler(target = c('theta[12]', 'theta[13]'), type = 'AF_slice')
+# MCMC_conf$addSampler(target = c('theta[14]', 'theta[15]', 'theta[16]', 'theta[17]','theta[18]', 
+#                                 'lambda[2]', 'lambda[3]', 'lambda[4]'), type = 'AF_slice')
+# 
+# end <- Sys.time() ; end ; end - start
+# 
+# # Compile MCMC
+# MCMC_R <- buildMCMC(MCMC_conf)
+# end <- Sys.time() ; end ; end - start
+# 
+# MCMC_C <- compileNimble(MCMC_R, project = PA_CR_R)
+# end <- Sys.time() ; end ; end - start
+# 
+# fit_PA_CR <- runMCMC(mcmc = MCMC_C,
+#                         nchains = 2,
+#                         niter = 40000,
+#                         nburnin = 10000,
+#                         thin = 15,
+#                         inits = inits())
+# 
 # save(fit_PA_CR,
 #      file = "fit_PA_CR.RData")
-# end <- Sys.time() ; end - start
+# end <- Sys.time() ;  end ; end - start
 ```
 
 # B. Inspect the results
 
-## 1. Trace plots 
+## 1. Diagnostic plots 
 
 ```{r}
 # load("outputs/fit_PA_CR.RData")
@@ -697,7 +700,7 @@ params <- c("alpha", "zeta", "sigma_zeta", "sigma_tau",
 #                                      nimble_output = fit_PA_CR)
 # 
 # nrows = length(params.plot)
-# save_plot(filename = "outputs//fit_PA_CR.png",
+# save_plot(filename = "outputs/diagnostic_fit_PA_CR.png",
 #           plot = diagnostic_plot,
 #           ncol = 3, nrow = 1,
 #           base_width = 3, base_height = nrows * 1.1, limitsize = FALSE)
@@ -730,7 +733,7 @@ Rhat_df <- get_Rhat(fit_PA_CR,
                                   "theta[1]", "theta[2]", "theta[3]", "theta[4]", "theta[5]",
                                   "theta[6]", "theta[7]", "theta[8]", "theta[9]", "theta[10]",
                                   "theta[11]", "theta[12]", "theta[13]", "theta[14]", "theta[15]",
-                                  "theta[16]", "theta[17]", "theta[18]", "theta[19]",
+                                  "theta[16]", "theta[17]", "theta[18]", 
                                   "lambda[1]", "lambda[2]", "lambda[3]", "lambda[4]", "sigma_omega"))
 ggplot(data = Rhat_df,
        aes(x = parameter, y = Rhat)) +
@@ -739,7 +742,7 @@ ggplot(data = Rhat_df,
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 6))
 ```
 
-All Rhat are < 0.01
+All Rhat are < 1.1
 
 ## 3. Caterpillar plots
 
@@ -764,13 +767,13 @@ model_df <- data.frame(name = c("alpha[1]", "alpha[2]", "alpha[3]", "alpha[4]", 
                                 "theta[1]", "theta[2]", "theta[3]", "theta[4]", "theta[5]",
                                 "theta[6]", "theta[7]", "theta[8]", "theta[9]", "theta[10]",
                                 "theta[11]", "theta[12]", "theta[13]", "theta[14]", "theta[15]",
-                                "theta[16]", "theta[17]", "theta[18]", "theta[19]",
+                                "theta[16]", "theta[17]", "theta[18]",
                                 "lambda[1]", "lambda[2]", "lambda[3]", "lambda[4]", "sigma_omega"),
                        covariate = c("intercept", "intercept", "intercept", "ecot NA", "ecot pelagic",
                                      "sd cohort", "sd residuals",
                                      # Litter size
                                      "intercept twin", "intercept twin", "intercept twin", "size twin", "
-                                     size2 twin", "DayCapture twin", "ecot NA twin", "ecot pelagic twin",
+                                     size2 twin", "DayCapture twin young", "ecot NA twin", "ecot pelagic twin",
                                      "intercept triplet", "intercept triplet", "intercept triplet",
                                      "size triplet", "sd year (twin)",
                                      # Girth
@@ -787,7 +790,7 @@ model_df <- data.frame(name = c("alpha[1]", "alpha[2]", "alpha[3]", "alpha[4]", 
                                      "survival 0yr", "survival 0yr", "survival 0yr",
                                      "CoY mass", "litter size", "size", "girth", "DayCapture", "SexMale",
                                      "ecot NA", "ecot pelagic",
-                                     "survival 1yr", "survival 2yr", "survival 3-4yr", "survival 5-19yr",
+                                     "survival 1yr", "survival 2-4yr", "survival 5-19yr",
                                      "survival 20+yr", "SexMale (>1yr)", "ecot NA (>1yr)", "ecot pelagic (>1yr)",
                                      "intercept p", "ecot NA p", "ecot pelagique p", "sex male p", "sigma p"),
                        age = c("young", "middle-aged", "old", NA, NA, NA, NA,
@@ -800,14 +803,13 @@ model_df <- data.frame(name = c("alpha[1]", "alpha[2]", "alpha[3]", "alpha[4]", 
                                "young", "middle-aged", "old", rep(NA, times = 6) ,
                                "young", "middle-aged", "old", "young", "middle-aged", "old",  rep(NA, times = 8) ,
                                # CR
-                               "young", "middle-aged", "old", rep(NA, times = 21)),
-                       submodel = c(rep("Maternal size", 7), rep("Litter size", 13), rep("Maternal girth", 11), rep("Cub mass", 23), rep("Cub survival", times = 24)))
+                               "young", "middle-aged", "old", rep(NA, times = 20)),
+                       submodel = c(rep("Maternal size", 7), rep("Litter size", 13), rep("Maternal girth", 11), rep("Cub mass", 23), rep("Cub survival", times = 23)))
 
 load("outputs/fit_PA_CR.RData")
 
 N <- dim(fit_PA_CR$samples$chain1)[1]
-res <- rbind(fit_PA_CR$samples$chain1[seq(1, N, by = 10), ],
-             fit_PA_CR$samples$chain2[seq(1, N, by = 10), ])
+res <- do.call(rbind, fit_PA_CR)[seq(1, 2*nrow(fit_PA_CR$chain1), by = 5), ]
 cols <- model_df$name
 
 caterpillar <- as.data.frame(res) %>%
@@ -831,8 +833,7 @@ ggplot(data = caterpillar,
   scale_color_brewer(palette = "Set1") +
   scale_x_discrete(limits = rev(caterpillar %>% distinct(name) %>% pull(name)),
                    labels = rev(caterpillar %>% distinct(covariate, name) %>% pull(covariate))) +
-  labs(x = "", y = "", color = "submodel",
-       subtitle = paste0("wAIC = ", round(fit_PA_CR$WAIC$WAIC, 2))) +
+  labs(x = "", y = "", color = "submodel") +
   coord_flip()
 ```
 
@@ -875,141 +876,26 @@ ggplot(data = caterpillar %>% filter(submodel == "Cub survival"),
 ```
 
 
-# C. Compute residuals and predictions
+# C. Compute residuals
 
-## 1. Predict number of surviving CoYs by litter size and maternal age
+The residuals computed here will be used to plot the observations corrected for variables other than that on the x axis for the figures.
 
-```{r}
-res <- rbind(fit_PA_CR$samples$chain1,
-             fit_PA_CR$samples$chain2)
-
-girth <- array(NA, dim = c(dim(res)[1], 3, 3),
-               dimnames = list(1:dim(res)[1], c("with singleton", "with twin", "with triplet"), c("young", "middle-aged", "old")))
-cub_mass <- array(NA, dim = c(dim(res)[1], 3, 3),
-                  dimnames = list(1:dim(res)[1], c("singleton", "twin", "triplet"), c("young", "middle-aged", "old")))
-surviving_cubs <- array(NA, dim = c(dim(res)[1], 3, 3),
-                        dimnames = list(1:dim(res)[1], c("singleton", "twin", "triplet"), c("young", "middle-aged", "old")))
-
-intercept_size <- c("alpha[1]", "alpha[2]", "alpha[3]")
-twin <- c(0, 1, 0)
-triplet <- c(0, 0, 1)
-intercept_girth <- c("gamma[1]", "gamma[2]", "gamma[3]")
-intercept_mass_singleton <- c("delta[1]", "delta[2]", "delta[3]")
-intercept_mass_twin <- c("delta[10]", "delta[11]", "delta[12]")
-intercept_mass_triplet <- c("delta[13]", "delta[14]", "delta[15]")
-intercept_survival <- c("theta[1]", "theta[2]", "theta[3]")
-
-
-for (i in 1:3) {                # maternal age
-  for (j in 1:3) {              # litter size
-    for (k in 1:dim(res)[1]) {
-
-      girth[k, j, i] <- res[k, intercept_girth[i]] +                  # intercept
-        res[k, "gamma[4]"] * res[k, intercept_size[i]] +         # effect of size
-        res[k, "gamma[6]"] * twin[j] +                           # effect twin litter
-        res[k, "gamma[7]"] * triplet[j]                          # effect triplet litter
-      # AFTER RE-RUNNING THE MODEL, NEED TO CHANGE gamma[6] to gamma[7]
-      # Singleton ++++++++++++++++++++++++++++
-      if (j == 1) {
-        cub_mass[k, j, i] <- (res[k, intercept_mass_singleton[i]] + # If female cub
-                                res[k, "delta[4]"] * res[k, intercept_size[i]] +
-                                res[k, "delta[5]"] * girth[k, j, i]) * 0.5 +
-
-          (res[k, intercept_mass_singleton[i]] +                     # If male cub
-             res[k, "delta[4]"] * res[k, intercept_size[i]] +
-             res[k, "delta[5]"] * girth[k, j, i] +
-             res[k, "delta[7]"]) * 0.5
-
-        surviving_cubs[k, j, i] <- ilogit(res[k, intercept_survival[i]] +
-                                            res[k, "theta[4]"] * cub_mass[k, j, i] +           # Singleton mass
-                                            res[k, "theta[5]"] * (twin[j] + triplet[j]) +    # Singleton litter
-                                            res[k, "theta[6]"] * res[k, intercept_size[i]] + # Effect of size
-                                            res[k, "theta[7]"] * girth[k, j, i])             # Effect of girth (with one cub)
-      } else {
-
-        # Twins ++++++++++++++++++++++++++++++++++
-        if (j == 2) {
-          cub_mass[k, j, i] <- (res[k, intercept_mass_twin[i]] +       # If female cub
-                                  res[k, "delta[16]"] * res[k, intercept_size[i]] +
-                                  res[k, "delta[17]"] * girth[k, j, i]) * 0.5 +
-
-            (res[k, intercept_mass_twin[i]] +                          # If male cub
-               res[k, "delta[16]"] * res[k, intercept_size[i]] +
-               res[k, "delta[17]"] * girth[k, j, i] +
-               res[k, "delta[19]"]) * 0.5
-
-          surviving_cubs[k, j, i] <- 2 * ilogit(res[k, intercept_survival[i]] +
-                                                  res[k, "theta[4]"] * cub_mass[k, j, i] +        # Twin mass
-                                                  res[k, "theta[5]"] * (twin[j] + triplet[j]) +   # twin litter
-                                                  res[k, "theta[6]"] * res[k, intercept_size[i]] +
-                                                  res[k, "theta[7]"] * girth[k, j, i])            # Girth with large litter
-        } else {
-
-          # Triplets ++++++++++++++++++++++++++++++++++
-          if (j == 3) {
-            cub_mass[k, j, i] <- (res[k, intercept_mass_triplet[i]] +   # If female cub
-                                    res[k, "delta[16]"] * res[k, intercept_size[i]] +
-                                    res[k, "delta[17]"] * girth[k, j, i]) * 0.5 +
-
-              (res[k, intercept_mass_triplet[i]] +                      # If male cub
-                 res[k, "delta[16]"] * res[k, intercept_size[i]] +
-                 res[k, "delta[17]"] * girth[k, j, i] +
-                 res[k, "delta[19]"]) * 0.5
-
-            surviving_cubs[k, j, i] <- 3 * ilogit(res[k, intercept_survival[i]] +
-                                                    res[k, "theta[4]"] * cub_mass[k, j, i] +       # Twin mass
-                                                    res[k, "theta[5]"] * (twin[j] + triplet[j]) +  # triplet litter
-                                                    res[k, "theta[6]"] * res[k, intercept_size[i]] +
-                                                    res[k, "theta[7]"] * girth[k, j, i])           # Girth with large litter
-
-
-          }
-        }
-      }
-    }
-  }
-}
-save(surviving_cubs, file = "outputs/predicted_surviving_cubs_by_litter_size_by_age.RData")
-load("outputs/predicted_surviving_cubs_by_litter_size_by_age.RData")
-
-surviving_cubs_df <- as.data.frame.table(surviving_cubs) %>%
-  rename(iteration = Var1, litter_size = Var2, age = Var3, value = Freq) %>%
-  mutate(age = factor(age, levels = c("young", "middle-aged", "old")))
-
-ggplot(surviving_cubs_df) +
-  geom_violin(aes(x = age, y = value, fill = age), alpha = 0.8) +
-  geom_boxplot(aes(x = age, y = value, fill = age),
-               position = position_dodge(0.9), width = 0.1, color = "grey",
-               outlier.shape = NA) +
-  theme_bw() +
-  theme(legend.position = "none") +
-  scale_fill_brewer(palette = "Dark2") +
-  labs(x = "age", y = "number of cubs") +
-  facet_wrap(.~litter_size)
-```
-
-
-## 2. Compute residuals
-
-The residuals computed here will be used to plot the observations corrected for other variables for the figures.
-
-### a. Cub mass
+### a. Cub mass for Fig. 2A
 
 ```{r}
 load("outputs/fit_PA_CR.RData")
-N <- dim(fit_PA_CR$samples$chain1)[1]
-res <- rbind(fit_PA_CR$samples$chain1[seq(1, N, by = 5), ],
-             fit_PA_CR$samples$chain2[seq(1, N, by = 5), ])
+res <- do.call(rbind, fit_PA_CR)[seq(1, 2*nrow(fit_PA_CR$chain1), by = 5), ]
 
-M <- M[1:410]
-log_mass_cub_vector <- log_mass_cub_vector[1:410]
+M <- M[1:nrow(data_cub)]
+log_mass_cub_vector <- log(read_csv("data/data_cub_PA_CR.csv",
+                                    show_col_types = F) %>% pull(mass))
 
-residuals_age_litter_size <- matrix(data = NA, nrow = dim(res)[1], ncol = length(M),
-                                    dimnames = list(1:dim(res)[1], 1:length(M)))
+residuals_age_litter_size <- matrix(data = NA, nrow = nrow(res), ncol = length(M),
+                                    dimnames = list(1:nrow(res), 1:length(M)))
 age_mat <- NULL
 
 for (k in 1:length(M)) {
-  for (l in 1:dim(res)[1]) {
+  for (l in 1:nrow(res)) {
     residuals_age_litter_size[l, k] <- M[k] -
 
       res[l, "delta[4]"] * LS1[mother[k], col_cub[k]] * mL[mother[k], col_cub[k]] -
@@ -1039,7 +925,7 @@ residuals_age_litter_size_df <- as.data.frame.table(exp(unscale(residuals_age_li
   summarize(mean = mean(value),
             ci_2.5 = quantile(value, probs = 0.025),
             ci_97.5 = quantile(value, probs = 0.975)) %>%
-  mutate(cub_number = LS_cub_focal_vector[1:410],
+  mutate(cub_number = LS_cub_focal_vector[1:nrow(data_cub)],
          litter_size = ifelse(cub_number == 1, "singleton",
                               ifelse(cub_number == 2, "twin", "triplet")),
          age_mat = age_mat)
@@ -1047,23 +933,22 @@ residuals_age_litter_size_df <- as.data.frame.table(exp(unscale(residuals_age_li
 write_csv(residuals_age_litter_size_df, "outputs/fit_PA_CR_cub_mass_corrected.csv")
 ```
 
-### b. Cub mass for plot length
+### b. Cub mass for Fig. 2B
 
 ```{r}
 load("outputs/fit_PA_CR.RData")
-N <- dim(fit_PA_CR$samples$chain1)[1]
-res <- rbind(fit_PA_CR$samples$chain1[seq(1, N, by = 5), ],
-             fit_PA_CR$samples$chain2[seq(1, N, by = 5), ])
+res <- do.call(rbind, fit_PA_CR)[seq(1, 2*nrow(fit_PA_CR$chain1), by = 5), ]
 
-M <- M[1:410]
-log_mass_cub_vector <- log_mass_cub_vector[1:410]
+M <- M[1:nrow(data_cub)]
+log_mass_cub_vector <- log(read_csv("data/data_cub_PA_CR.csv",
+                                    show_col_types = F) %>% pull(mass))
 
-residuals <- matrix(data = NA, nrow = dim(res)[1], ncol = length(M),
-                                    dimnames = list(1:dim(res)[1], 1:length(M)))
+residuals <- matrix(data = NA, nrow = nrow(res), ncol = length(M),
+                                    dimnames = list(1:nrow(res), 1:length(M)))
 age_mat <- length_mat <- NULL
 
 for (k in 1:length(M)) {
-  for (l in 1:dim(res)[1]) {
+  for (l in 1:nrow(res)) {
     residuals[l, k] <- M[k] -
 
       res[l, "delta[1]"] * LS1[mother[k], col_cub[k]] * mAgeY[mother[k], col_cub[k]] -
@@ -1110,32 +995,32 @@ residuals_df <- as.data.frame.table(exp(unscale(residuals, log_mass_cub_vector))
   summarize(mean = mean(value),
             ci_2.5 = quantile(value, probs = 0.025),
             ci_97.5 = quantile(value, probs = 0.975)) %>%
-  mutate(cub_number = LS_cub_focal_vector[1:410],
+  mutate(cub_number = LS_cub_focal_vector[1:nrow(data_cub)],
          litter_size = ifelse(cub_number == 1, "singleton",
                               ifelse(cub_number == 2, "twin", "triplet")),
          age_mat = age_mat,
          length_mat = length_mat)
 
+
 write_csv(residuals_df, "outputs/fit_PA_CR_cub_mass_corrected_for_plot_length.csv")
 ```
 
-### c. Cub mass for plot girth
+### c. Cub mass for Fig. 2C
 
 ```{r}
 load("outputs/fit_PA_CR.RData")
-N <- dim(fit_PA_CR$samples$chain1)[1]
-res <- rbind(fit_PA_CR$samples$chain1[seq(1, N, by = 5), ],
-             fit_PA_CR$samples$chain2[seq(1, N, by = 5), ])
+res <- do.call(rbind, fit_PA_CR)[seq(1, 2*nrow(fit_PA_CR$chain1), by = 5), ]
 
-M <- M[1:410]
-log_mass_cub_vector <- log_mass_cub_vector[1:410]
+M <- M[1:nrow(data_cub)]
+log_mass_cub_vector <- log(read_csv("data/data_cub_PA_CR.csv",
+                                    show_col_types = F) %>% pull(mass))
 
-residuals <- matrix(data = NA, nrow = dim(res)[1], ncol = length(M),
-                                    dimnames = list(1:dim(res)[1], 1:length(M)))
+residuals <- matrix(data = NA, nrow = nrow(res), ncol = length(M),
+                                    dimnames = list(1:nrow(res), 1:length(M)))
 age_mat <- girth_mat <- NULL
 
 for (k in 1:length(M)) {
-  for (l in 1:dim(res)[1]) {
+  for (l in 1:nrow(res)) {
     residuals[l, k] <- M[k] -
 
       res[l, "delta[1]"] * LS1[mother[k], col_cub[k]] * mAgeY[mother[k], col_cub[k]] -
@@ -1182,7 +1067,7 @@ residuals_df <- as.data.frame.table(exp(unscale(residuals, log_mass_cub_vector))
   summarize(mean = mean(value),
             ci_2.5 = quantile(value, probs = 0.025),
             ci_97.5 = quantile(value, probs = 0.975)) %>%
-  mutate(cub_number = LS_cub_focal_vector[1:410],
+  mutate(cub_number = LS_cub_focal_vector[1:nrow(data_cub)],
          litter_size = ifelse(cub_number == 1, "singleton",
                               ifelse(cub_number == 2, "twin", "triplet")),
          age_mat = age_mat,
@@ -1191,175 +1076,218 @@ residuals_df <- as.data.frame.table(exp(unscale(residuals, log_mass_cub_vector))
 write_csv(residuals_df, "outputs/fit_PA_CR_cub_mass_corrected_for_plot_girth.csv")
 ```
 
-## 3. Plot random effects
 
-Here I convert the random effects to the natural scale for continuous variables, and to the probability scale for probabilities.
+# D. Predict number of surviving cubs
+
+Let's predict the number of surviving cubs by litter size and maternal age
+
+We need to account for the fact that females who produce singleton/twin/triplet litters
+are not the same size on average. Let's compute the size of females corrected for the
+cohort random effect and the effect of the space-use strategy:
 
 ```{r}
+LS_vector <- NULL
+for (k in 1:length(row_litter)) {
+  LS_vector[k] <- LS[row_litter[k], col_litter[k]]
+}
+
 load("outputs/fit_PA_CR.RData")
-N <- dim(fit_PA_CR$samples$chain1)[1]
-res <- rbind(fit_PA_CR$samples$chain1[seq(1, N, by = 10), ],
-             fit_PA_CR$samples$chain2[seq(1, N, by = 10), ])
+res <- do.call(rbind, fit_PA_CR)[seq(1, 2*nrow(fit_PA_CR$chain1), by = 5), ]
 
-yearly_rd_eff <- array(data = NA, dim = c(dim(res)[1], 32, 4),
-                       dimnames = list(1:dim(res)[1], 1:32, c("litter size", "maternal girth", "cub mass", "recapture probability")))
+residuals_length  <- matrix(data = NA, nrow = nrow(res), ncol = length(row_litter),
+                          dimnames = list(1:nrow(res), 1:length(row_litter)))
+age_mat <- length <- NULL
 
-CR_data <- read_csv("data/data_PA_CR.csv",
-                    show_col_types = F)
-data_cub <- read_csv("data/data_cub_PA_CR.csv",
-                    show_col_types = F)
+for (k in 1:length(row_litter)) {
+  for (l in 1:nrow(res)) {
+    residuals_length[l, k] <- mL[row_litter[k], col_litter[k]] -
+
+      res[l, "alpha[4]"] * mSpUnk[row_litter[k]] -
+      res[l, "alpha[5]"] * mSpPel[row_litter[k]] -
+
+      res[l, paste0("zeta[", cohort[k],"]")]
+
+    length[k] <- Length[row_litter[k], col_litter[k]]
+    age_mat[k] <- ifelse(AGE[row_litter[k], col_litter[k]] %in% 5:9, "young",
+                         ifelse(AGE[row_litter[k], col_litter[k]] %in% 10:15, "middle-aged", "old"))
+  }
+}
+
+residuals_length_df <- as.data.frame.table(residuals_length) %>% 
+  rename(iteration = Var1, female = Var2, value = Freq) %>%
+  mutate(age_mat = rep(age_mat, each = nrow(res)),
+         litter_size = rep(LS_vector, each = nrow(res)))
+
+LS1_means <- residuals_length_df %>%
+  filter(litter_size == 1) %>%
+  group_by(iteration, age_mat) %>%
+  summarize(mean_across_ind = mean(value))
+LS2_means <- residuals_length_df %>%
+  filter(litter_size == 2) %>%
+  group_by(iteration, age_mat) %>%
+  summarize(mean_across_ind = mean(value))
+LS3_means <- residuals_length_df %>%
+  filter(litter_size == 3) %>%
+  mutate(age_mat = ifelse(age_mat == "old", "old", "young_middle")) %>%   # Group young (n=1) aand middle-aged (n=2)
+  group_by(iteration, age_mat) %>%
+  summarize(mean_across_ind = mean(value))
+
+
+mLY <- cbind(LS1_means %>% filter(age_mat == "young") %>% pull(mean_across_ind),
+             LS2_means %>% filter(age_mat == "young") %>% pull(mean_across_ind),
+             LS3_means %>% filter(age_mat == "young_middle") %>% pull(mean_across_ind))
+mLM <- cbind(LS1_means %>% filter(age_mat == "middle-aged") %>% pull(mean_across_ind),
+             LS2_means %>% filter(age_mat == "middle-aged") %>% pull(mean_across_ind),
+             LS3_means %>% filter(age_mat == "young_middle") %>% pull(mean_across_ind))
+mLO <- cbind(LS1_means %>% filter(age_mat == "old") %>% pull(mean_across_ind),
+             LS2_means %>% filter(age_mat == "old") %>% pull(mean_across_ind),
+             LS3_means %>% filter(age_mat == "old") %>% pull(mean_across_ind))
 ```
 
-```{r}
-# Maternal length +++++++++++++++
-length <- length_with_rd_eff <- matrix(NA, nrow = dim(res)[1], ncol = n_year,
-                dimnames = list(1:dim(res)[1], 1:n_year))
-for (t in 1:n_year) {         # Year
-  for (j in 1:dim(res)[1]) {       # MCMC iteration
-    length_with_rd_eff[j, t] <- res[j, "alpha[1]"] +
-      res[j, paste0("zeta[", t, "]")]
-    
-    length[j, t] <- res[j, "alpha[1]"] 
-  }
-}
-
-cohort_rd_eff <- unscale(length_with_rd_eff, CR_data$s_length) - unscale(length, CR_data$s_length)
-
-df_plot_cohort <- as.data.frame.table(cohort_rd_eff) %>%
-  rename(iteration = Var1, cohort = Var2, value = Freq) %>%
-  mutate(cohort = as.integer(cohort),
-         trait = "maternal size") %>%
-  left_join(x = .,
-            y = df_cohort,
-            by = "cohort")
-```
-
 
 ```{r}
-# Litter size ++++++++++++++++
-log_twins <- log_twins_with_rd_eff <- log_triplets <- matrix(data = NA, nrow = dim(res)[1], ncol = n_year,
-                                                          dimnames = list(1:dim(res)[1], 1:n_year))
-for (t in 1:n_year) {    # year
-  for (j in 1:dim(res)[1]) {
-    log_twins_with_rd_eff[j, t] <- res[j, "beta[1]"] +
-      res[j, paste0("eta[", t, "]")]
-    log_triplets[j, t] <- res[j, "beta[9]"] 
+LS <- girth <- cub_mass <- surviving_cubs <- survival <- array(NA, dim = c(nrow(res), 3, 3),
+                dimnames = list(1:nrow(res), c("singleton", "twin", "triplet"), c("young", "middle-aged", "old")))
+mAgeY <- c(1, 0, 0) ; mAgeM <- c(0, 1, 0) ; mAgeO <- c(0, 0, 1) 
 
-    log_twins[j, t] <- res[j, "beta[1]"] 
-    log_triplets[j, t] <- res[j, "beta[9]"] 
-
-  }
-}
-prob_twins <- exp(log_twins) / (exp(0) + exp(log_twins) + exp(log_triplets))
-prob_twins_with_rd_eff <- exp(log_twins_with_rd_eff) / (exp(0) + exp(log_twins_with_rd_eff) + exp(log_triplets))
-
-yearly_rd_eff[, , "litter size"] <- prob_twins_with_rd_eff - prob_twins
-
-# Maternal girth +++++++++++++++
-girth <- girth_with_rd_eff <- matrix(NA, nrow = dim(res)[1], ncol = n_year,
-                dimnames = list(1:dim(res)[1], 1:n_year))
-for (t in 1:n_year) {         # Year
-  for (j in 1:dim(res)[1]) {       # MCMC iteration
-    girth_with_rd_eff[j, t] <- res[j, "gamma[1]"] +
-      res[j, paste0("rho[", t, "]")]
-    
-    girth[j, t] <- res[j, "gamma[1]"] 
-  }
-}
-
-yearly_rd_eff[, , "maternal girth"] <- unscale(girth_with_rd_eff, CR_data$girth) - unscale(girth, CR_data$girth)
-
-# Cub mass +++++++++++++++
-cub_mass <- cub_mass_with_rd_eff <- matrix(NA, nrow = dim(res)[1], ncol = n_year,
-                                        dimnames = list(1:dim(res)[1], 1:32))
-for (t in 1:n_year) {           # Year
-  for (j in 1:dim(res)[1]) {        # MCMC iteration
-    cub_mass_with_rd_eff[j, t] <- res[j, "delta[10]"] +
+for (i in 1:3) {          # maternal age
+  for (j in 1:3) {        # Litter size
+    for (k in 1:nrow(res)) {
       
-      res[j, paste0("nu[", t, "]")]
-    
-    cub_mass[j, t] <- res[j, "delta[10]"]
+      ############################# Maternal girth #############################
+      girth[k, j, i] <- res[k, "gamma[1]"] * mAgeY[i] +    # mean
+                                res[k, "gamma[2]"] * mAgeM[i] + 
+                                res[k, "gamma[3]"] * mAgeO[i] +
+                                res[k, "gamma[4]"] * (mAgeY[i] * mLY[k, j] +
+                                                        mAgeM[i] * mLM[k, j] +
+                                                        mAgeO[i] * mLO[k, j]) +
+                                res[k, "gamma[6]"] * (-1) * (j - 1) * (j - 3) +
+                                res[k, "gamma[7]"] * 0.5 * (j - 1) * (j - 2)
+      ################################ Cub mass ################################ 
+      # Singleton ++++++++++++++++++++++++++++
+      if (j == 1) {
+        cub_mass[k, j, i] <-  (log(0.5 * (exp((res[k, "delta[1]"] * mAgeY[i] +    
+                                        res[k, "delta[2]"] * mAgeM[i] + 
+                                        res[k, "delta[3]"] * mAgeO[i] +
+                                        res[k, "delta[4]"] * (mAgeY[i] * mLY[k, j] +
+                                                                mAgeM[i] * mLM[k, j] +
+                                                                mAgeO[i] * mLO[k, j]) +  # Effect of size
+                                        res[k, "delta[5]"] * girth[k, j, i]) * sd_log_mass + mean_log_mass) +
+                                       
+                                       exp((res[k, "delta[1]"] * mAgeY[i] +    
+                                          res[k, "delta[2]"] * mAgeM[i] + 
+                                          res[k, "delta[3]"] * mAgeO[i] +
+                                          res[k, "delta[4]"] * (mAgeY[i] * mLY[k, j] +
+                                                                  mAgeM[i] * mLM[k, j] +
+                                                                  mAgeO[i] * mLO[k, j]) +  # Effect of size
+                                          res[k, "delta[5]"] * girth[k, j, i] + 
+                                          res[k, "delta[7]"]) * sd_log_mass + mean_log_mass))) - mean_log_mass)/sd_log_mass
+
+                                     
+          surviving_cubs[k, j, i] <- ilogit(res[k, "theta[1]"] * mAgeY[i] +    # mean
+                                                  res[k, "theta[2]"] * mAgeM[i] + 
+                                                  res[k, "theta[3]"] * mAgeO[i] + +
+                                                  res[k, "theta[4]"] * cub_mass[k, j, i] +      # mass
+                                                  res[k, "theta[5]"] * ((-1) * (j - 1) * (j - 3) + 0.5 * (j - 1) * (j - 2)) +      # Litter size 
+                                                  res[k, "theta[6]"] * (mAgeY[i] * mLY[k, j] +
+                                                                          mAgeM[i] * mLM[k, j] +
+                                                                          mAgeO[i] * mLO[k, j]) +  # Effect of size
+                                                  res[k, "theta[7]"] * girth[k, j, i] +         # Effect of girth 
+                                                  res[k, "theta[9]"] * 0.5)                     # Effect of sex
+          
+          survival[k, j, i] <- surviving_cubs[k, j, i]
+      } else {
+
+        # Twins ++++++++++++++++++++++++++++++++++
+        if (j == 2) {
+          cub_mass[k, j, i] <- (log(0.5 * (exp((res[k, "delta[10]"] * mAgeY[i] +    
+                                      res[k, "delta[11]"] * mAgeM[i] + 
+                                      res[k, "delta[12]"] * mAgeO[i] +
+                                      res[k, "delta[16]"] * (mAgeY[i] * mLY[k, j] +
+                                                                          mAgeM[i] * mLM[k, j] +
+                                                                          mAgeO[i] * mLO[k, j]) +  # Effect of size
+                                      res[k, "delta[17]"] * girth[k, j, i]) * sd_log_mass + mean_log_mass) +
+
+                                      exp((res[k, "delta[10]"] * mAgeY[i] +    
+                                      res[k, "delta[11]"] * mAgeM[i] + 
+                                      res[k, "delta[12]"] * mAgeO[i] +
+                                      res[k, "delta[16]"] * (mAgeY[i] * mLY[k, j] +
+                                                                          mAgeM[i] * mLM[k, j] +
+                                                                          mAgeO[i] * mLO[k, j]) +  # Effect of size
+                                      res[k, "delta[17]"] * girth[k, j, i] + 
+                                      res[k, "delta[19]"]) * sd_log_mass + mean_log_mass))) - mean_log_mass)/sd_log_mass
+
+                                  
+          surviving_cubs[k, j, i] <- 2 * ilogit(res[k, "theta[1]"] * mAgeY[i] +    # mean
+                                                  res[k, "theta[2]"] * mAgeM[i] + 
+                                                  res[k, "theta[3]"] * mAgeO[i] + +
+                                                  res[k, "theta[4]"] * cub_mass[k, j, i] +      # mass
+                                                  res[k, "theta[5]"] * ((-1) * (j - 1) * (j - 3) + 0.5 * (j - 1) * (j - 2)) +      # Litter size 
+                                                  res[k, "theta[6]"] * (mAgeY[i] * mLY[k, j] +
+                                                                          mAgeM[i] * mLM[k, j] +
+                                                                          mAgeO[i] * mLO[k, j]) +  # Effect of size
+                                                  res[k, "theta[7]"] * girth[k, j, i] +         # Effect of girth 
+                                                  res[k, "theta[9]"] * 0.5)                     # Effect of sex
+          survival[k, j, i] <- surviving_cubs[k, j, i]/2
+        } else {
+          # Triplets ++++++++++++++++++++++++++++++++++
+          cub_mass[k, j, i] <- (log(0.5 * (exp((res[k, "delta[13]"] * mAgeY[i] +    
+                                      res[k, "delta[14]"] * mAgeM[i] + 
+                                      res[k, "delta[15]"] * mAgeO[i] +
+                                      res[k, "delta[16]"] * (mAgeY[i] * mLY[k, j] +
+                                                                          mAgeM[i] * mLM[k, j] +
+                                                                          mAgeO[i] * mLO[k, j]) +  # Effect of size
+                                      res[k, "delta[17]"] * girth[k, j, i]) * sd_log_mass + mean_log_mass) +
+
+                                      exp((res[k, "delta[13]"] * mAgeY[i] +    
+                                      res[k, "delta[14]"] * mAgeM[i] + 
+                                      res[k, "delta[15]"] * mAgeO[i] +
+                                      res[k, "delta[16]"] * (mAgeY[i] * mLY[k, j] +
+                                                                          mAgeM[i] * mLM[k, j] +
+                                                                          mAgeO[i] * mLO[k, j]) +  # Effect of size
+                                      res[k, "delta[17]"] * girth[k, j, i] + 
+                                      res[k, "delta[19]"]) * sd_log_mass + mean_log_mass))) - mean_log_mass)/sd_log_mass
+          
+          surviving_cubs[k, j, i] <- 3 * ilogit(res[k, "theta[1]"] * mAgeY[i] +    # mean
+                                                  res[k, "theta[2]"] * mAgeM[i] + 
+                                                  res[k, "theta[3]"] * mAgeO[i] + +
+                                                  res[k, "theta[4]"] * cub_mass[k, j, i] +      # mass
+                                                  res[k, "theta[5]"] * ((-1) * (j - 1) * (j - 3) + 0.5 * (j - 1) * (j - 2)) +      # Litter size 
+                                                  res[k, "theta[6]"] * (mAgeY[i] * mLY[k, j] +
+                                                                          mAgeM[i] * mLM[k, j] +
+                                                                          mAgeO[i] * mLO[k, j]) +  # Effect of size
+                                                  res[k, "theta[7]"] * girth[k, j, i] +         # Effect of girth 
+                                                  res[k, "theta[9]"] * 0.5)                     # Effect of sex
+          survival[k, j, i] <- surviving_cubs[k, j, i]/3
+          
+        }
+      }
+    }
   }
 }
-yearly_rd_eff[, , "cub mass"] <-  exp(unscale(cub_mass_with_rd_eff, log_mass_cub_vector[1:410])) - exp(unscale(cub_mass, log_mass_cub_vector[1:410]))
 
+save(surviving_cubs, file = "outputs/predicted_surviving_cubs_by_litter_size_by_age.RData")
+load("outputs/predicted_surviving_cubs_by_litter_size_by_age.RData")
 
-# Recapture +++++++++++++++
-recapture <- recapture_with_rd_eff <- matrix(NA, nrow = dim(res)[1], ncol = (n_year-1),
-                                          dimnames = list(1:dim(res)[1], 1:(n_year-1)))
-for (t in 1:(n_year-1)) {           # Year
-  for (j in 1:dim(res)[1]) {        # MCMC iteration
-    recapture_with_rd_eff[j, t] <- res[j, "lambda[1]"] +
-      res[j, paste0("omega[", t, "]")]
-    
-    recapture[j, t] <- res[j, "lambda[1]"]
-  }
-}
-yearly_rd_eff[, 2:32, "recapture probability"] <-  plogis(recapture_with_rd_eff) - plogis(recapture)
+surviving_cubs_df <- as.data.frame.table(surviving_cubs) %>%
+  rename(iteration = Var1, litter_size = Var2, age = Var3, value = Freq) %>%
+  mutate(age = factor(age, levels = c("young", "middle-aged", "old")))
 
-
-df_plot_year <- as.data.frame.table(yearly_rd_eff) %>%
-  rename(iteration = Var1, year = Var2, trait = Var3, value = Freq) %>%
-  mutate(year = droplevels(year),
-         year = 1991 + as.numeric(year))
-```
-
-```{r, fig.height = 9, fig.width = 7}
-cohort <- ggplot(df_plot_cohort, 
-       aes(x = as.factor(year), y = value)) +
-  stat_summary(fun.data = get_mean_and_CI,
-               fun.args = list(lower = 0.025, upper = 0.975),
-               geom = "pointrange", 
-               size = 0.4) +
-  stat_summary(fun.data = get_mean_and_CI,
-               fun.args = list(lower = 0.25, upper = 0.75),
-               geom = "pointrange", 
-               size = 0.4, linewidth = 0.9) +
+ggplot(surviving_cubs_df) +
+  geom_violin(aes(x = age, y = value, fill = age), alpha = 0.8) +
+  geom_boxplot(aes(x = age, y = value, fill = age),
+               position = position_dodge(0.9), width = 0.1, color = "grey",
+               outlier.shape = NA) +
   theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  facet_wrap(.~trait, ncol = 1, scales = "free_y") +
-  labs(x = "year", y = "cohort random effect")
-  
-year <- ggplot(df_plot_year, 
-       aes(x = as.factor(year), y = value)) +
-  stat_summary(fun.data = get_mean_and_CI,
-               fun.args = list(lower = 0.025, upper = 0.975),
-               geom = "pointrange", 
-               size = 0.4) +
-  stat_summary(fun.data = get_mean_and_CI,
-               fun.args = list(lower = 0.25, upper = 0.75),
-               geom = "pointrange", 
-               size = 0.4, linewidth = 0.9) +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  facet_wrap(.~trait, ncol = 1, scales = "free_y") +
-  labs(x = "year", y = "yearly random effect")
-
-layout <- "
-AAA
-AAA
-AAA
-AAA
-BBB
-BBB
-BBB
-BBB
-BBB
-BBB
-BBB
-BBB
-BBB
-BBB
-BBB
-"
-
-cohort / year +
-  plot_annotation(tag_levels = 'A') +
-  plot_layout(design = layout)
+  theme(legend.position = "none") +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(x = "age", y = "number of cubs") +
+  facet_wrap(.~litter_size)
 ```
 
 
-# D. Compute pd and other quantities
+
+# E. Compute probabilities of direction (pd)
 
 ## 1. Pd and effect sizes
 
@@ -1374,8 +1302,7 @@ data_cub <- read_csv("data/data_cub_PA_CR.csv",
 
 ```{r}
 load("outputs/fit_PA_CR.RData")
-res <- rbind(fit_PA_CR$samples$chain1[, ],
-             fit_PA_CR$samples$chain2[, ])
+res <- do.call(rbind, fit_PA_CR)
 
 range(CR_data %>% filter(cub_status_complete == "c") %>% pull(s_length))
 
@@ -1417,6 +1344,7 @@ mean(res[, "sigma_zeta"]^2)
 quantile(res[, "sigma_zeta"]^2, probs = c(0.025, 0.975))
 ```
 
+
 ### b. Litter size
 
 ```{r}
@@ -1428,18 +1356,16 @@ sd(CR_data %>% filter(cub_status_complete == "c") %>% pull(cub_number))
 ```{r}
 # Maternal age +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 load("outputs/fit_PA_CR.RData")
+res <- do.call(rbind, fit_PA_CR)
 
-res <- rbind(fit_PA_CR$samples$chain1[, ],
-             fit_PA_CR$samples$chain2[, ])
-
-log_twins <- matrix(data = NA, nrow = dim(res)[1], ncol = 3,
-                    dimnames = list(1:dim(res)[1], c("young", "middle-aged", "old")))
-log_triplets <- matrix(data = NA, nrow = dim(res)[1], ncol = 3,
-                       dimnames = list(1:dim(res)[1], c("young", "middle-aged", "old")))
+log_twins <- matrix(data = NA, nrow = nrow(res), ncol = 3,
+                    dimnames = list(1:nrow(res), c("young", "middle-aged", "old")))
+log_triplets <- matrix(data = NA, nrow = nrow(res), ncol = 3,
+                       dimnames = list(1:nrow(res), c("young", "middle-aged", "old")))
 mAgeY <- c(1, 0, 0) ; mAgeM <- c(0, 1, 0) ; mAgeO <- c(0, 0, 1)
 
 for (i in 1:3) {    # maternal age
-  for (j in 1:dim(res)[1]) {
+  for (j in 1:nrow(res)) {
     log_twins[j, i] <- res[j, "beta[1]"] * mAgeY[i] +
       res[j, "beta[2]"] * mAgeM[i] +
       res[j, "beta[3]"] * mAgeO[i]
@@ -1490,10 +1416,10 @@ get_probability_direction(res[, "beta[5]"])
 # Effect of date of capture
 get_probability_direction(res[, "beta[6]"])
 
-# Effect of ecotype NA
+# Effect of space-use strategy NA
 get_probability_direction(res[, "beta[7]"])
 
-# Effect of ecotype pelagic
+# Effect of space-use strategy pelagic
 get_probability_direction(res[, "beta[8]"])
 
 # Yearly random effect
@@ -1506,8 +1432,7 @@ quantile(res[, "sigma_eta"]^2, probs = c(0.025, 0.975))
 
 ```{r}
 load("outputs/fit_PA_CR.RData")
-res <- rbind(fit_PA_CR$samples$chain1[, ],
-             fit_PA_CR$samples$chain2[, ])
+res <- do.call(rbind, fit_PA_CR)
 
 range(CR_data %>% filter(cub_status_complete == "c") %>% pull(girth))
 
@@ -1554,10 +1479,10 @@ get_probability_direction(res[, "gamma[4]"])
 # Effect of date of capture
 get_probability_direction(res[, "gamma[5]"])
 
-# Effect of ecotype NA
+# Effect of space-use strategy NA
 get_probability_direction(res[, "gamma[8]"])
 
-# Effect of ecotype pelagic
+# Effect of space-use strategy pelagic
 get_probability_direction(res[, "gamma[9]"])
 
 # Yearly random effect 
@@ -1569,81 +1494,103 @@ quantile(res[, "sigma_rho"]^2, probs = c(0.025, 0.975))
 
 ```{r}
 load("outputs/fit_PA_CR.RData")
-res <- rbind(fit_PA_CR$samples$chain1[, ],
-             fit_PA_CR$samples$chain2[, ])
+res <- do.call(rbind, fit_PA_CR)
 
 range(data_cub %>% pull(mass))
 
 # Effect of litter size on cub mass +++++++++++++++++++++++
 
 ## Ignoring maternal age ##
-prop_age_class_sex <- rev(data_cub %>% 
-                            mutate(age_category = ifelse(age_mat %in% 5:9, 1,
-                                                         ifelse(age_mat %in% 10:15, 2, 3))) %>%
-                            count(age_category, litter_size, sex) %>%
-                            mutate(prop = ifelse(litter_size == 1, n/nrow(data_cub %>% filter(litter_size == 1)),
-                                                 ifelse(litter_size == 2, n/nrow(data_cub %>% filter(litter_size == 2)),
-                                                        ifelse(litter_size == 3, n/nrow(data_cub %>% filter(litter_size == 3)), NA)))) %>%
-                            arrange(litter_size, sex) %>%
-                            pull(prop))
+# Here we compute cub masses for each litter size independently of maternal age.
+# Do to so, we average the posterior across maternal agr groups within each litter
+# size, having weighted the posteriors by the proportion of females of a given age
+# for each litter sizes. We assume a sex ratio at unity.
+prop_age_litter_size_df <- read_csv("data/data_cub_PA_CR.csv",
+                                        show_col_types = F) %>%
+  mutate(age_category = ifelse(age_mat %in% 5:9, "young",
+                               ifelse(age_mat %in% 10:15, "middle-aged", "old"))) %>%
+  count(age_category, litter_size) %>%
+  group_by(litter_size) %>%
+  mutate(freq = n / sum(n)) %>%
+  arrange(-litter_size, age_category) 
 
+prop_age_litter_size <- rev(prop_age_litter_size_df$freq)
 
-load("outputs/fit_PA_CR.RData")
-res <- rbind(fit_PA_CR$samples$chain1[, ],
-             fit_PA_CR$samples$chain2[, ])
-load("data/log_mass.RData")
-log_mass_cub_vector <- log_mass_cub_vector[1:410]
+CR_data_counts <- read_csv("data/data_PA_CR.csv",
+                           show_col_types = F) %>%
+  filter(cub_status_complete == "c") %>%
+  count(cub_number) 
+
+data_cub_mass_count <- read_csv("data/data_cub_PA_CR.csv",
+         show_col_types = F) %>%
+  count(litter_size)
+
+log_mass_cub_vector <- read_csv("data/data_cub_PA_CR.csv",
+                                show_col_types = F) %>%
+  mutate(log_mass = log(mass)) %>% pull(log_mass)
 
 singleton <- c(1, 0, 0) ; twin <- c(0, 1, 0) ; triplet <- c(0, 0, 1)
-cub_mass <- matrix(NA, nrow = dim(res)[1], ncol = 3,
-                   dimnames = list(1:dim(res)[1], c("singleton", "twin", "triplet")))
+mAgeY <- c(1, 0, 0) ; mAgeM <- c(0, 1, 0) ; mAgeO <- c(0, 0, 1)
+male <- c(0, 1)
+# cub_mass <- matrix(NA, nrow = nrow(res), ncol = 3,
+#                    dimnames = list(1:nrow(res), c("singleton", "twin", "triplet")))
+cub_mass <- array(NA, dim = c(nrow(res), 2, 3, 3),
+                  dimnames = list(1:nrow(res), c("female", "male"), c("young", "middle-aged", "old"), c("singleton", "twin", "triplet")))
+
 for (i in 1:3) {                 # Litter size
-  for (j in 1:dim(res)[1]) {   # MCMC iteration
-    cub_mass[j, i] <- singleton[i] * (res[j, "delta[1]"] * prop_age_class_sex[1] +
-                                        res[j, "delta[2]"] * prop_age_class_sex[2] +
-                                        res[j, "delta[3]"] * prop_age_class_sex[3] +
-                                        (res[j, "delta[1]"] + res[j, "delta[7]"]) * prop_age_class_sex[4] +
-                                        (res[j, "delta[2]"] + res[j, "delta[7]"]) * prop_age_class_sex[5] +
-                                        (res[j, "delta[3]"] + res[j, "delta[7]"]) * prop_age_class_sex[6]) + 
-      
-      twin[i] * (res[j, "delta[10]"] * prop_age_class_sex[7]+
-                   res[j, "delta[11]"] * prop_age_class_sex[8] +
-                   res[j, "delta[12]"] * prop_age_class_sex[9] +
-                   (res[j, "delta[10]"] + res[j, "delta[19]"]) * prop_age_class_sex[10] +
-                   (res[j, "delta[11]"] + res[j, "delta[19]"]) * prop_age_class_sex[11] +
-                   (res[j, "delta[12]"] + res[j, "delta[19]"]) * prop_age_class_sex[12]) +
-      
-      triplet[i] * (res[j, "delta[13]"] * prop_age_class_sex[13]+
-                      res[j, "delta[14]"] * prop_age_class_sex[14] +
-                      res[j, "delta[15]"] * prop_age_class_sex[15] +
-                      (res[j, "delta[13]"] + res[j, "delta[19]"]) * 0 +  # no young female with a triplet male cub
-                      (res[j, "delta[14]"] + res[j, "delta[19]"]) * prop_age_class_sex[16] +
-                      (res[j, "delta[15]"] + res[j, "delta[19]"]) * prop_age_class_sex[17]) 
-    
+  for (j in 1:3) {                 # Age class
+    for (k in 1:2) {                 # Cub sex
+      for (l in 1:nrow(res)) {   # MCMC iteration
+        cub_mass[l, k, j, i] <- singleton[i] * (res[l, "delta[1]"] * mAgeY[j] +  
+                                                  res[l, "delta[2]"] * mAgeM[j] +  
+                                                  res[l, "delta[3]"] * mAgeO[j] +  
+                                                  res[l, "delta[7]"] * male[k]) + 
+          twin[i] * (res[l, "delta[10]"] * mAgeY[j] +  
+                            res[l, "delta[11]"] * mAgeM[j] +  
+                            res[l, "delta[12]"] * mAgeO[j]) + 
+          triplet[i] * (res[l, "delta[13]"] * mAgeY[j] +  
+                       res[l, "delta[14]"] * mAgeM[j] +  
+                       res[l, "delta[15]"] * mAgeO[j]) + 
+          
+          (twin[i] + triplet[i]) * res[l, "delta[19]"] * male[k]
+      }
+    }
   }
 }
+
 cub_mass_bt <- exp(unscale(cub_mass, log_mass_cub_vector)) 
 
-# Mass
-mean(cub_mass_bt[, 1])
-mean(cub_mass_bt[, 2])
-mean(cub_mass_bt[, 3])
+cub_mass_no_age <- matrix(NA, nrow = nrow(res), ncol = 3, 
+                          dimnames = list(1:nrow(res), c("singleton", "twin", "triplet")))
+
+cub_mass_no_age[, 1] <- (cub_mass_bt[, 1, 1, 1] * 0.5 + cub_mass_bt[, 2, 1, 1] * 0.5) * prop_age_litter_size[1] +
+  (cub_mass_bt[, 1, 2, 1] * 0.5 + cub_mass_bt[, 2, 2, 1] * 0.5) * prop_age_litter_size[3] +
+  (cub_mass_bt[, 1, 3, 1] * 0.5 + cub_mass_bt[, 2, 3, 1] * 0.5) * prop_age_litter_size[2] 
+
+cub_mass_no_age[, 2] <- (cub_mass_bt[, 1, 1, 2] * 0.5 + cub_mass_bt[, 2, 1, 2] * 0.5) * prop_age_litter_size[4] +
+  (cub_mass_bt[, 1, 2, 2] * 0.5 + cub_mass_bt[, 2, 2, 2] * 0.5) * prop_age_litter_size[6] +
+  (cub_mass_bt[, 1, 3, 2] * 0.5 + cub_mass_bt[, 2, 3, 2] * 0.5) * prop_age_litter_size[5] 
+
+cub_mass_no_age[, 3] <- (cub_mass_bt[, 1, 1, 3] * 0.5 + cub_mass_bt[, 2, 1, 3] * 0.5) * prop_age_litter_size[7] +
+  (cub_mass_bt[, 1, 2, 3] * 0.5 + cub_mass_bt[, 2, 2, 3] * 0.5) * prop_age_litter_size[9] +
+  (cub_mass_bt[, 1, 3, 3] * 0.5 + cub_mass_bt[, 2, 3, 3] * 0.5) * prop_age_litter_size[8] 
+
 
 # Diff between singleton and twin
-relative_diff <- cub_mass_bt[, 1]/ cub_mass_bt[, 2]
+relative_diff <- cub_mass_no_age[, 1]/ cub_mass_no_age[, 2]
 mean(relative_diff)
 quantile(relative_diff, probs = c(0.025, 0.975))
 sum(relative_diff > 1) / length(relative_diff)
 
 # Diff between singleton and triplet
-relative_diff <- cub_mass_bt[, 1]/ cub_mass_bt[, 3]
+relative_diff <- cub_mass_no_age[, 1]/ cub_mass_no_age[, 3]
 mean(relative_diff)
 quantile(relative_diff, probs = c(0.025, 0.975))
 sum(relative_diff > 1) / length(relative_diff)
 
 
 # Diff between twin and triplet
-relative_diff <-  cub_mass_bt[, 2]/ cub_mass_bt[, 3]
+relative_diff <-  cub_mass_no_age[, 2]/ cub_mass_no_age[, 3]
 mean(relative_diff)
 quantile(relative_diff, probs = c(0.025, 0.975))
 sum(relative_diff > 1) / length(relative_diff)
@@ -1735,7 +1682,6 @@ quantile(diff, probs = c(0.025, 0.975))
 get_probability_direction(diff)
 ```
 
-
 ```{r}
 # Other covariates +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Effect of size 
@@ -1759,8 +1705,8 @@ get_probability_direction(res[, "delta[6]"])
 get_probability_direction(res[, "delta[18]"])
 
 # Effect of sex
-load("data/log_mass.RData")
-log_mass_cub_vector <- log_mass_cub_vector[1:410]
+log_mass_cub_vector <- log(read_csv("data/data_cub_PA_CR.csv",
+                                    show_col_types = F) %>% pull(mass))
 
 relative_diff <- exp(unscale(res[, "delta[2]"] + res[, "delta[7]"], log_mass_cub_vector)) / 
   exp(unscale(res[, "delta[2]"], log_mass_cub_vector))
@@ -1770,13 +1716,13 @@ quantile(relative_diff, probs = c(0.025, 0.975))
 get_probability_direction(relative_diff)
 
 
-# Effect of ecotype NA
+# Effect of space-use strategy NA
 # Singleton
 get_probability_direction(res[, "delta[8]"])
 # Twins
 get_probability_direction(res[, "delta[20]"])
 
-# Effect of ecotype pelagic
+# Effect of space-use strategy pelagic
 # Singleton
 get_probability_direction(res[, "delta[9]"])
 # Twins
@@ -1799,68 +1745,94 @@ quantile(res[, "sigma_nu"]^2, probs = c(0.025, 0.975))
 
 ```{r}
 ## Ignoring maternal age ##
-prop_age_class_sex <- rev(data_cub %>% 
-                            mutate(age_category = ifelse(age_mat %in% 5:9, 1,
-                                                         ifelse(age_mat %in% 10:15, 2, 3))) %>%
-                            count(age_category, litter_size, sex) %>%
-                            mutate(prop = ifelse(litter_size == 1, n/nrow(data_cub %>% filter(litter_size == 1)),
-                                                 ifelse(litter_size == 2, n/nrow(data_cub %>% filter(litter_size == 2)),
-                                                        ifelse(litter_size == 3, n/nrow(data_cub %>% filter(litter_size == 3)), NA)))) %>%
-                            arrange(litter_size, sex) %>%
-                            pull(prop))
+# Here we compute cub masses for each litter size independently of maternal age.
+# Do to so, we average the posterior across maternal agr groups within each litter
+# size, having weighted the posteriors by the proportion of females of a given age
+# for each litter sizes. We assume a sex ratio at unity.
+prop_age_litter_size_df <- read_csv("data/data_cub_PA_CR.csv",
+                                        show_col_types = F) %>%
+  mutate(age_category = ifelse(age_mat %in% 5:9, "young",
+                               ifelse(age_mat %in% 10:15, "middle-aged", "old"))) %>%
+  count(age_category, litter_size) %>%
+  group_by(litter_size) %>%
+  mutate(freq = n / sum(n)) %>%
+  arrange(-litter_size, age_category) 
 
+prop_age_litter_size <- rev(prop_age_litter_size_df$freq)
 
-load("outputs/fit_PA_CR.RData")
-res <- rbind(fit_PA_CR$samples$chain1,
-             fit_PA_CR$samples$chain2)
-load("data/log_mass.RData")
-log_mass_cub_vector <- log_mass_cub_vector[1:410]
+CR_data_counts <- read_csv("data/data_PA_CR.csv",
+                           show_col_types = F) %>%
+  filter(cub_status_complete == "c") %>%
+  count(cub_number) 
+
+data_cub_mass_count <- read_csv("data/data_cub_PA_CR.csv",
+         show_col_types = F) %>%
+  count(litter_size)
+
+log_mass_cub_vector <- read_csv("data/data_cub_PA_CR.csv",
+                                show_col_types = F) %>%
+  mutate(log_mass = log(mass)) %>% pull(log_mass)
 
 singleton <- c(1, 0, 0) ; twin <- c(0, 1, 0) ; triplet <- c(0, 0, 1)
-cub_mass <- matrix(NA, nrow = dim(res)[1], ncol = 3,
-                   dimnames = list(1:dim(res)[1], c("singleton", "twin", "triplet")))
+mAgeY <- c(1, 0, 0) ; mAgeM <- c(0, 1, 0) ; mAgeO <- c(0, 0, 1)
+male <- c(0, 1)
+# cub_mass <- matrix(NA, nrow = nrow(res), ncol = 3,
+#                    dimnames = list(1:nrow(res), c("singleton", "twin", "triplet")))
+cub_mass <- array(NA, dim = c(nrow(res), 2, 3, 3),
+                  dimnames = list(1:nrow(res), c("female", "male"), c("young", "middle-aged", "old"), c("singleton", "twin", "triplet")))
+
 for (i in 1:3) {                 # Litter size
-  for (j in 1:dim(res)[1]) {   # MCMC iteration
-    cub_mass[j, i] <- singleton[i] * (res[j, "delta[1]"] * prop_age_class_sex[1] +
-                                        res[j, "delta[2]"] * prop_age_class_sex[2] +
-                                        res[j, "delta[3]"] * prop_age_class_sex[3] +
-                                        (res[j, "delta[1]"] + res[j, "delta[7]"]) * prop_age_class_sex[4] +
-                                        (res[j, "delta[2]"] + res[j, "delta[7]"]) * prop_age_class_sex[5] +
-                                        (res[j, "delta[3]"] + res[j, "delta[7]"]) * prop_age_class_sex[6]) + 
-      
-      twin[i] * (res[j, "delta[10]"] * prop_age_class_sex[7]+
-                   res[j, "delta[11]"] * prop_age_class_sex[8] +
-                   res[j, "delta[12]"] * prop_age_class_sex[9] +
-                   (res[j, "delta[10]"] + res[j, "delta[19]"]) * prop_age_class_sex[10] +
-                   (res[j, "delta[11]"] + res[j, "delta[19]"]) * prop_age_class_sex[11] +
-                   (res[j, "delta[12]"] + res[j, "delta[19]"]) * prop_age_class_sex[12]) +
-      
-      triplet[i] * (res[j, "delta[13]"] * prop_age_class_sex[13]+
-                      res[j, "delta[14]"] * prop_age_class_sex[14] +
-                      res[j, "delta[15]"] * prop_age_class_sex[15] +
-                      (res[j, "delta[13]"] + res[j, "delta[19]"]) * 0 +  # no young female with a triplet male cub
-                      (res[j, "delta[14]"] + res[j, "delta[19]"]) * prop_age_class_sex[16] +
-                      (res[j, "delta[15]"] + res[j, "delta[19]"]) * prop_age_class_sex[17]) 
-    
+  for (j in 1:3) {                 # Age class
+    for (k in 1:2) {                 # Cub sex
+      for (l in 1:nrow(res)) {   # MCMC iteration
+        cub_mass[l, k, j, i] <- singleton[i] * (res[l, "delta[1]"] * mAgeY[j] +  
+                                                  res[l, "delta[2]"] * mAgeM[j] +  
+                                                  res[l, "delta[3]"] * mAgeO[j] +  
+                                                  res[l, "delta[7]"] * male[k]) + 
+          twin[i] * (res[l, "delta[10]"] * mAgeY[j] +  
+                            res[l, "delta[11]"] * mAgeM[j] +  
+                            res[l, "delta[12]"] * mAgeO[j]) + 
+          triplet[i] * (res[l, "delta[13]"] * mAgeY[j] +  
+                       res[l, "delta[14]"] * mAgeM[j] +  
+                       res[l, "delta[15]"] * mAgeO[j]) + 
+          
+          (twin[i] + triplet[i]) * res[l, "delta[19]"] * male[k]
+      }
+    }
   }
 }
 
 cub_mass_bt <- exp(unscale(cub_mass, log_mass_cub_vector)) 
 
-litter_mass <- cub_mass_bt
-litter_mass[, 2] <- 2 * cub_mass_bt[, 2]
-litter_mass[, 3] <- 3 * cub_mass_bt[, 3]
+cub_mass_no_age <- matrix(NA, nrow = nrow(res), ncol = 3, 
+                          dimnames = list(1:nrow(res), c("singleton", "twin", "triplet")))
 
-apply(litter_mass, 2, mean)
+cub_mass_no_age[, 1] <- (cub_mass_bt[, 1, 1, 1] * 0.5 + cub_mass_bt[, 2, 1, 1] * 0.5) * prop_age_litter_size[1] +
+  (cub_mass_bt[, 1, 2, 1] * 0.5 + cub_mass_bt[, 2, 2, 1] * 0.5) * prop_age_litter_size[3] +
+  (cub_mass_bt[, 1, 3, 1] * 0.5 + cub_mass_bt[, 2, 3, 1] * 0.5) * prop_age_litter_size[2] 
+
+cub_mass_no_age[, 2] <- (cub_mass_bt[, 1, 1, 2] * 0.5 + cub_mass_bt[, 2, 1, 2] * 0.5) * prop_age_litter_size[4] +
+  (cub_mass_bt[, 1, 2, 2] * 0.5 + cub_mass_bt[, 2, 2, 2] * 0.5) * prop_age_litter_size[6] +
+  (cub_mass_bt[, 1, 3, 2] * 0.5 + cub_mass_bt[, 2, 3, 2] * 0.5) * prop_age_litter_size[5] 
+
+cub_mass_no_age[, 3] <- (cub_mass_bt[, 1, 1, 3] * 0.5 + cub_mass_bt[, 2, 1, 3] * 0.5) * prop_age_litter_size[7] +
+  (cub_mass_bt[, 1, 2, 3] * 0.5 + cub_mass_bt[, 2, 2, 3] * 0.5) * prop_age_litter_size[9] +
+  (cub_mass_bt[, 1, 3, 3] * 0.5 + cub_mass_bt[, 2, 3, 3] * 0.5) * prop_age_litter_size[8] 
+
+litter_mass_no_age <- cub_mass_no_age
+litter_mass_no_age[, 2] <- 2 * litter_mass_no_age[, 2]
+litter_mass_no_age[, 3] <- 3 * litter_mass_no_age[, 3]
+
+apply(litter_mass_no_age, 2, mean)
 
 # Diff between singleton and twin
-relative_diff <- (litter_mass[, 2]/ litter_mass[, 1])
+relative_diff <- (litter_mass_no_age[, 2]/ litter_mass_no_age[, 1])
 mean(relative_diff)
 quantile(relative_diff, probs = c(0.025, 0.975))
 sum(relative_diff > 1) / length(relative_diff)
 
 # Diff between twin and triplet
-relative_diff <- (litter_mass[, 3]/litter_mass[, 2])
+relative_diff <- (litter_mass_no_age[, 3]/litter_mass_no_age[, 2])
 mean(relative_diff)
 quantile(relative_diff, probs = c(0.025, 0.975))
 sum(relative_diff > 1) / length(relative_diff)
@@ -1871,8 +1843,8 @@ sum(relative_diff > 1) / length(relative_diff)
 
 ```{r}
 load("outputs/fit_PA_CR.RData")
-res <- rbind(fit_PA_CR$samples$chain1,
-             fit_PA_CR$samples$chain2)
+res <- do.call(rbind, fit_PA_CR)[seq(1, 2*nrow(fit_PA_CR$chain1), by = 5), ]
+
 
 # Effect of mass
 get_probability_direction(res[, "theta[4]"])
@@ -1913,10 +1885,10 @@ get_probability_direction(res[, "theta[8]"])
 # Effect of Sex
 get_probability_direction(res[, "theta[9]"])
 
-# Effect of ecotype NA
+# Effect of space-use strategy NA
 get_probability_direction(res[, "theta[10]"])
 
-# Effect of ecotype pelagic
+# Effect of space-use strategy pelagic
 get_probability_direction(res[, "theta[11]"])
 ```
 
@@ -1925,8 +1897,7 @@ get_probability_direction(res[, "theta[11]"])
 
 ```{r}
 load("outputs/fit_PA_CR.RData")
-res <- rbind(fit_PA_CR$samples$chain1[, ],
-             fit_PA_CR$samples$chain2[, ])
+res <- do.call(rbind, fit_PA_CR)
 
 # Resident
 mean(plogis(res[, "lambda[1]"]))
@@ -1957,7 +1928,6 @@ load("outputs/predicted_surviving_cubs_by_litter_size_by_age.RData")
 ### Singleton VS twin ###
 diff_by_age <- surviving_cubs[, 2, ] - surviving_cubs[, 1, ]
 
-
 # Young
 mean(diff_by_age[, 1])
 quantile(diff_by_age[, 1], probs = c(0.025, 0.975))
@@ -1977,7 +1947,6 @@ get_probability_direction(diff_by_age[, 3])
 
 ### Twin VS triplet ###
 diff_by_age <- surviving_cubs[, 2, ] - surviving_cubs[, 3, ]
-
 
 # Young
 mean(diff_by_age[, 1])
@@ -2000,8 +1969,7 @@ get_probability_direction(diff_by_age[, 3])
 
 ```{r}
 load("outputs/fit_PA_CR.RData")
-res <- rbind(fit_PA_CR$samples$chain1[, ],
-             fit_PA_CR$samples$chain2[, ])
+res <- do.call(rbind, fit_PA_CR)
 
 # Maternal length
 mean(1 - res[, "sigma_tau"]^2)
@@ -2014,7 +1982,7 @@ mean(1 - res[, "sigma_epsilon"]^2)
 ```
 
 
-# E. Plot main figures
+# F. Plot main figures
 
 ```{r}
 CR_data <- read_csv("data/data_PA_CR.csv",
@@ -2040,9 +2008,7 @@ CR_data_counts <- CR_data %>%
 
 
 load("outputs/fit_PA_CR.RData")
-N <- dim(fit_PA_CR$samples$chain1)[1]
-res <- rbind(fit_PA_CR$samples$chain1[seq(1, N, by = 3), ],
-             fit_PA_CR$samples$chain2[seq(1, N, by = 3), ])
+res <- do.call(rbind, fit_PA_CR)[seq(1, 2*nrow(fit_PA_CR$chain1), by = 2), ]
 ```
 
 
@@ -2050,14 +2016,14 @@ res <- rbind(fit_PA_CR$samples$chain1[seq(1, N, by = 3), ],
 
 ```{r}
 ## Effect of maternal age ##
-log_twins <- matrix(data = NA, nrow = dim(res)[1], ncol = 3,
-                    dimnames = list(1:dim(res)[1], c("young", "middle-aged", "old")))
-log_triplets <- matrix(data = NA, nrow = dim(res)[1], ncol = 3,
-                       dimnames = list(1:dim(res)[1], c("young", "middle-aged", "old")))
+log_twins <- matrix(data = NA, nrow = nrow(res), ncol = 3,
+                    dimnames = list(1:nrow(res), c("young", "middle-aged", "old")))
+log_triplets <- matrix(data = NA, nrow = nrow(res), ncol = 3,
+                       dimnames = list(1:nrow(res), c("young", "middle-aged", "old")))
 mAgeY <- c(1, 0, 0) ; mAgeM <- c(0, 1, 0) ; mAgeO <- c(0, 0, 1)
 
 for (i in 1:3) {    # maternal age
-  for (j in 1:dim(res)[1]) {
+  for (j in 1:nrow(res)) {
     log_twins[j, i] <- res[j, "beta[1]"] * mAgeY[i] +
       res[j, "beta[2]"] * mAgeM[i] +
       res[j, "beta[3]"] * mAgeO[i]
@@ -2115,15 +2081,15 @@ lengthgrid <- 50
 grid_scaled <- seq(min(CR_data$length_s), max(CR_data$length_s), length = lengthgrid)
 grid <- unscale(grid_scaled, CR_data$s_length)
 
-log_twins <- array(data = NA, dim = c(dim(res)[1], lengthgrid, 3),
-                   dimnames = list(1:dim(res)[1], grid, c("young", "middle-aged", "old")))
-log_triplets <- array(data = NA, dim = c(dim(res)[1], lengthgrid, 3),
-                      dimnames = list(1:dim(res)[1], grid, c("young", "middle-aged", "old")))
+log_twins <- array(data = NA, dim = c(nrow(res), lengthgrid, 3),
+                   dimnames = list(1:nrow(res), grid, c("young", "middle-aged", "old")))
+log_triplets <- array(data = NA, dim = c(nrow(res), lengthgrid, 3),
+                      dimnames = list(1:nrow(res), grid, c("young", "middle-aged", "old")))
 mAgeY <- c(1, 0, 0) ; mAgeM <- c(0, 1, 0) ; mAgeO <- c(0, 0, 1)
 
 for (i in 1:3) {    # maternal age
   for (j in 1:lengthgrid) {
-    for (k in 1:dim(res)[1]) {
+    for (k in 1:nrow(res)) {
       log_twins[k, j, i] <- res[k, "beta[1]"] * mAgeY[i] +
         res[k, "beta[2]"] * mAgeM[i] +
         res[k, "beta[3]"] * mAgeO[i] +
@@ -2202,18 +2168,18 @@ ggsave("outputs/figure 2. Litter size.png",
 data_cub_count <- data_cub %>%
   count(age_mat, litter_size)
 
-load("data/log_mass.RData")
-log_mass_cub_vector <- log_mass_cub_vector[1:410]
+log_mass_cub_vector <- log(read_csv("data/data_cub_PA_CR.csv",
+                                    show_col_types = F) %>% pull(mass))
 
 ## Effect of litter size and maternal age ##
 mAgeY <- c(1, 0, 0) ; mAgeM <- c(0, 1, 0) ; mAgeO <- c(0, 0, 1)
 singleton <- c(1, 0, 0) ; twin <- c(0, 1, 0) ; triplet <- c(0, 0, 1) 
-cub_mass <- array(NA, dim = c(dim(res)[1], 3, 3),
-                  dimnames = list(1:dim(res)[1], c("singleton", "twin", "triplet"),
+cub_mass <- array(NA, dim = c(nrow(res), 3, 3),
+                  dimnames = list(1:nrow(res), c("singleton", "twin", "triplet"),
                                   c("young", "middle-aged", "old")))
 for (i in 1:3) {                 # Maternal age
   for (j in 1:3) {               # litter size
-    for (k in 1:dim(res)[1]) {   # MCMC iteration
+    for (k in 1:nrow(res)) {   # MCMC iteration
       cub_mass[k, j, i] <- res[k, "delta[1]"] * singleton[j] * mAgeY[i] +
         res[k, "delta[2]"] * singleton[j] * mAgeM[i] +
         res[k, "delta[3]"] * singleton[j] * mAgeO[i] +
@@ -2277,12 +2243,12 @@ lengthgrid <- 50
 grid_scaled <- seq(range(CR_data$girth_s)[1], range(CR_data$girth_s)[2], length = lengthgrid)
 grid <- unscale(grid_scaled, CR_data$girth)
 
-cub_mass_girth <- array(NA, dim = c(dim(res)[1], lengthgrid, 3),
-                        dimnames = list(1:dim(res)[1], grid, c("singleton", "twin", "triplet")))
+cub_mass_girth <- array(NA, dim = c(nrow(res), lengthgrid, 3),
+                        dimnames = list(1:nrow(res), grid, c("singleton", "twin", "triplet")))
 singleton <- c(1, 0, 0) ; twin <- c(0, 1, 0) ; triplet <- c(0, 0, 1) 
 for (i in 1:3) {                 # litter size 
   for (j in 1:lengthgrid)   {    # Covariate value
-    for (k in 1:dim(res)[1]) {   # MCMC iteration
+    for (k in 1:nrow(res)) {   # MCMC iteration
       cub_mass_girth[k, j, i] <- 
         res[k, "delta[2]"] * singleton[i] +
         res[k, "delta[5]"] * singleton[i] * grid_scaled[j] +
@@ -2334,12 +2300,12 @@ plot_girth <- ggplot() +
 grid_scaled <- seq(range(CR_data$length_s)[1], range(CR_data$length_s)[2], length = lengthgrid)
 grid <- unscale(grid_scaled, CR_data$s_length)
 
-cub_mass_size <- array(NA, dim = c(dim(res)[1], lengthgrid, 3),
-                       dimnames = list(1:dim(res)[1], grid, c("singleton", "twin", "triplet")))
+cub_mass_size <- array(NA, dim = c(nrow(res), lengthgrid, 3),
+                       dimnames = list(1:nrow(res), grid, c("singleton", "twin", "triplet")))
 singleton <- c(1, 0, 0) ; twin <- c(0, 1, 0) ; triplet <- c(0, 0, 1) 
 for (i in 1:3) {                 # litter size 
   for (j in 1:lengthgrid)   {    # Covariate value
-    for (k in 1:dim(res)[1]) {   # MCMC iteration
+    for (k in 1:nrow(res)) {   # MCMC iteration
       cub_mass_size[k, j, i] <- 
         res[k, "delta[2]"] * singleton[i] +
         res[k, "delta[5]"] * singleton[i] * grid_scaled[j] +
@@ -2402,8 +2368,8 @@ ggsave("outputs/figure 3. cub mass.png",
 
 ```{r}
 ## Effect of cub mass ##
-load("data/log_mass.RData")
-log_mass_cub_vector <- log_mass_cub_vector[1:410]
+log_mass_cub_vector <- log(read_csv("data/data_cub_PA_CR.csv",
+                                    show_col_types = F) %>% pull(mass))
 M <- as.vector(scale(log_mass_cub_vector))
 
 
@@ -2411,12 +2377,12 @@ lengthgrid <- 50
 grid_scaled <- seq(range(M)[1], range(M)[2], length = lengthgrid)
 grid <- exp(unscale(grid_scaled, log_mass_cub_vector))
 
-cub_survival <- array(NA, dim = c(dim(res)[1], lengthgrid, 3),
-                      dimnames = list(1:dim(res)[1], grid, c("young", "middle-aged", "old")))
+cub_survival <- array(NA, dim = c(nrow(res), lengthgrid, 3),
+                      dimnames = list(1:nrow(res), grid, c("young", "middle-aged", "old")))
 mAgeY <- c(1, 0, 0) ; mAgeM <- c(0, 1, 0) ; mAgeO <- c(0, 0, 1)
 for(i in 1:3) {                # Maternal age
   for (j in 1:lengthgrid) {    # Covariate value
-    for (k in 1:dim(res)[1]) {   # MCMC iteration
+    for (k in 1:nrow(res)) {   # MCMC iteration
       cub_survival[k, j, i] <- plogis(res[k, "theta[1]"] * mAgeY[i] +
                                         res[k, "theta[2]"] * mAgeM[i] +
                                         res[k, "theta[3]"] * mAgeO[i] +
@@ -2457,11 +2423,11 @@ data_cub_count <- data_cub %>%
 
 mAgeY <- c(1, 0, 0) ; mAgeM <- c(0, 1, 0) ; mAgeO <- c(0, 0, 1)
 twin <- c(0, 1)
-cub_survival <- array(NA, dim = c(dim(res)[1], 2, 3),
-                      dimnames = list(1:dim(res)[1], c("singleton", "twin"), c("young", "middle-aged", "old")))
+cub_survival <- array(NA, dim = c(nrow(res), 2, 3),
+                      dimnames = list(1:nrow(res), c("singleton", "twin"), c("young", "middle-aged", "old")))
 for (i in 1:3) {                 # Maternal age
   for (j in 1:2) {               # Litter size
-    for (k in 1:dim(res)[1]) {   # MCMC iteration
+    for (k in 1:nrow(res)) {   # MCMC iteration
       cub_survival[k, j, i] <- plogis(res[k, "theta[1]"] * mAgeY[i] +
                                         res[k, "theta[2]"] * mAgeM[i] +
                                         res[k, "theta[3]"] * mAgeO[i] +
@@ -2486,6 +2452,7 @@ plot_maternal_age <- ggplot(data = df_plot %>% filter(litter_size == "twin"),
   geom_text(data = data_cub_count,
             aes(x = age_mat, y = Inf, label = n), size = 3, vjust = 1.5) +
   theme_bw() +
+  ylim(c(0, 1)) +
   theme(legend.position = "none") +
   scale_fill_brewer(palette = "Dark2") +
   labs(x = "maternal age", y = "cub survival") 
