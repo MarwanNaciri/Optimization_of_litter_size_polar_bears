@@ -612,20 +612,22 @@ params <- c("alpha", "zeta", "sigma_zeta", "sigma_tau",
 
 ## 3. Run the model
 
+Running the model takes >15 hours. The output of the model (fit_PA_CR) is provided in the repository as a .RData file.
+
 ```{r}
-# start <- Sys.time() ; start  # 31h
+# start <- Sys.time() ; start  
 # # Create R model
 # inits_values <- inits()
 # PA_CR_R <- nimbleModel(code = PA_CR,
-#                                constants = my.constants,
-#                                data = dat,
-#                                inits = inits_values,
-#                                calculate = FALSE)
+#                           constants = my.constants,
+#                           data = dat,
+#                           inits = inits_values,
+#                           calculate = FALSE)
 # end <- Sys.time() ; end ; end - start
 # 
 # # Compile model (in C++)
 # PA_CR_C <- compileNimble(PA_CR_R,
-#                                  showCompilerOutput = FALSE)
+#                             showCompilerOutput = FALSE)
 # end <- Sys.time() ; end ; end - start
 # 
 # # Configure of MCMC
