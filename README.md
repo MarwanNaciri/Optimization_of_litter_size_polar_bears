@@ -1,7 +1,7 @@
 # Optimization_of_litter_size_in_polar_bears
-Data and code for the manuscript on the optimization of litter size in polar bears
+Marwan Naciri, Jon Aars, Magnus Andersen, Marie-Anne Blanchet, Andrew E. Derocher, Marlène Gamelon, Øystein Wiig, and Sarah Cubaynes. 2025. Data and code for "Offspring number, size, and survival: state-dependent optimization of litter size in a long-lived capital breeder".
 
-The Rmardown file PA_CR.Rmd contains the full workflow of the analysis starting from the (cleaned) capture data, and ending with the figures presented in the main text. Specifically, the workflow involves:
+The Rmardown file PA_CR.Rmd contains the full workflow of the analysis presented in Naciri et al. (2025). Specifically, the workflow involves:
 - building the model in a Bayesian framework
 - generating the input data and initial values for the model
 - fitting the model with MCMC using nimble
@@ -10,7 +10,7 @@ The Rmardown file PA_CR.Rmd contains the full workflow of the analysis starting 
 - quantifying the level of evidence for effects
 - plotting the main figures.
 
-The model takes several hours to run (~18h on my machine). The output of the model is therefore included in this repository.
+The model takes ~6 hours to run on an HPC cluster, but the output of the model is also included in this repository.
 
 
 Software and package version:
