@@ -1,13 +1,13 @@
 ---
 title: "R code PA-CR model"
 author: "Marwan Naciri"
-date: "2023-12-13"
+date: "2025-07-10"
 output: pdf_document
 ---
 
 This code generates the results and the main figures presented in the manuscript “Offspring number, size, and survival: state-dependent optimization of litter size in a long-lived capital breeder” *Ecosphere*
 
-Marwan Naciri, Jon Aars, Magnus Anderson, Marie-Anne Blanchet, Andrew E. Derocher, Marlène Gamelon, Øystein Wiig, and Sarah Cubaynes
+Marwan Naciri, Jon Aars, Magnus Andersen, Marie-Anne Blanchet, Andrew E. Derocher, Marlène Gamelon, Øystein Wiig, and Sarah Cubaynes
 
 ```{r setup, include=FALSE, echo=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
@@ -20,18 +20,14 @@ library(cowplot)
 
 check_convergence <- function(params.plot, nimble_output) {
   # Process Nimble output into dataframe
-  chain1 <- data.frame(nimble_output$chain1) %>%
+  n_chains <- length(nimble_output)
+  chains <- data.frame(do.call(rbind, nimble_output)) %>%
     dplyr::select(any_of(params.plot)) %>%
-    mutate(chain = "1",
-           iteration = seq(1, dim(nimble_output$chain1)[1], by = 1))
-  chain2 <- data.frame(nimble_output$chain2) %>%
-    dplyr::select(any_of(params.plot)) %>%
-    mutate(chain = "2",
-           iteration = seq(1, dim(nimble_output$chain2)[1], by = 1))
-  chains <- rbind(chain1, chain2) 
-  
+    mutate(chain = rep(1:n_chains, each = nrow(nimble_output$chain1)),
+           iteration = rep(1:nrow(nimble_output$chain1), times = n_chains))
   chains_l <- pivot_longer(chains, cols = any_of(params.plot), names_to = "parameter") %>%
-    mutate(parameter = factor(parameter, levels = params.plot)) 
+    mutate(parameter = factor(parameter, levels = params.plot),
+           chain = factor(chain, levels = c("1", "2", "3"))) 
   
   param.mean <- chains_l %>%
     group_by(parameter, chain) %>%
@@ -306,23 +302,31 @@ PA_CR <- nimbleCode({
                        mSpPel[mother[i]] * Sex[i] * (Age1[i, t+1] + Age2[i, t+1])) + # all male dependent cubs of pelagic females
         lambda[4] * Sex[i] * (Age3_4[i, t+1] + Age5_19[i, t+1] + Age20[i, t+1]) +    
         omega[t]
+      
+      S[1, 1, i, t] <- phi[i, t]
+      S[1, 2, i, t] <- 1 - phi[i, t]
+      S[2, 1, i, t] <- 0
+      S[2, 2, i, t] <- 1
+
+      E[1, 1, i, t] <- p[i, t]
+      E[1, 2, i, t] <- 1 - p[i, t]
+      E[2, 1, i, t] <- 0
+      E[2, 2, i, t] <- 1
     }
   }
   
-  for (i in 1:n_ind) {
-    
-    # latent state at the first capture
-    z[i, f[i]] <- 1
-    
-    for (t in (f[i]+1):n_year) {
-      # State process
-      z[i, t] ~ dbern(phi[i, t-1] * z[i, t-1])
-      
-      # Observation process
-      y[i, t] ~ dbern(p[i, t-1] * z[i, t])
-      
-    } # t
-  } # i
+  for(i in 1:n_ind){
+    chi[i, f[i], 1] <- 1
+    chi[i, f[i], 2] <- 0
+
+    for(t in f[i]:(n_year-1)){
+      chi[i, t+1, 1] <- inprod(chi[i, t, 1:2], S[1:2, 1, i, t]) * E[1, CH[i, t+1], i, t]
+      chi[i, t+1, 2] <- inprod(chi[i, t, 1:2], S[1:2, 2, i, t]) * E[2, CH[i, t+1], i, t]
+    }
+
+    lik[i] <- sum(chi[i, n_year, 1:2])
+    ones[i] ~ dbin(lik[i], freq[i])
+  }
 })
 
 ```
@@ -361,9 +365,11 @@ for (i in 1:nrow(CH)){
   if (f[i] == 1) next
   CH[i, 1:(f[i]-1)] <- NA
 }
+# Replace 0 for non-recaptures by 2 (necessary for the marginalized likelyhood of
+# the CR model)
+CH[CH == 0] <- 2
 
-
-# Create matrices for age group
+# Create matrices for age groups
 AGE <- mAgeY <- mAgeM <- mAgeO <- Age0 <- Age1 <- Age2 <- Age3_4 <- Age5_19 <- Age20 <- 
   matrix(NA, nrow = nrow(CH), ncol = ncol(CH),
          dimnames = list(rownames(CH), colnames(CH)))
@@ -416,8 +422,8 @@ mG <- (Girth - mean(Girth, na.rm = T))/sd(Girth, na.rm = T)
 mG[is.na(mG)] <- 0
 
 
-# Get the rows and columns in the capture history matrix that correspond to a 
-# a female captured with a litter-of-the-year
+# Retrieve the rows and columns in the capture history matrix that correspond to a 
+# capture of a female with a litter-of-the-year
 row_litter <- col_litter <- NULL
 for (i in 1:nrow(CH)) {
   for (t in 1:ncol(CH)) {
@@ -428,8 +434,7 @@ for (i in 1:nrow(CH)) {
   }
 }
 
-
-# Get cohort
+# Compute the cohort of each female ever captured with a litter-of-the-year
 birth_year <- NULL
 for (k in 1:length(row_litter)) {
   birth_year[k] <- col_litter[k] + 1991 - AGE[row_litter[k], col_litter[k]]
@@ -444,12 +449,11 @@ cohort <- data.frame(year = birth_year) %>%
 n_cohort <- length(unique(cohort))
 
 
-# Create matrices with cub mass, litter size and line of mother
+# Create matrices with information for each cub: cub mass, litter size, and row number of mother
 mass_cub <- LS_focal <- matrix(0, nrow = nrow(CH), ncol = ncol(CH),
                                dimnames = list(rownames(CH), colnames(CH)))
 ID_mother <- rep(NA, times = nrow(CH))
-mother <- rep(423, times = nrow(CH)) # I use 423 because there is no NA on that line
-# in age (matrix). This way, there won't be NAs in the model
+mother <- rep(which(rownames(CH) == 7818), times = nrow(CH)) # I use female 7818 to fill the cells of adults because there is no NA on that line in the matrix AGE. This allows to avoid a bug
 for (k in 1:nrow(data_cub)) {
   i <- which(rownames(CH) == data_cub$ID_NR[k])
   t <- which(colnames(CH) == as.character(data_cub$year[k]))
@@ -461,7 +465,7 @@ for (k in 1:nrow(data_cub)) {
   ID_mother[i] <- data_cub$ID_mat[ which(data_cub$ID_NR == rownames(CH)[i]) ]
   mother[i] <- which(rownames(CH) == ID_mother[i])
 }
-mass_cub_vector <- unname(apply(mass_cub, 1, max))             # vector with the mass of each cub (except cubs that weren't weighed)
+mass_cub_vector <- unname(apply(mass_cub, 1, max))        # vector with the mass of each cub (except cubs that weren't weighed)
 mass_cub_vector[mass_cub_vector == 0] <- NA
 log_mass_cub_vector <- log(mass_cub_vector)
 mean_log_mass <- mean(log_mass_cub_vector, na.rm = T) ; sd_log_mass <- sd(log_mass_cub_vector, na.rm = T)
@@ -470,26 +474,7 @@ M[is.na(M)] <- 0
 
 LS_cub_focal_vector <- unname(apply(LS_focal, 1, max))
 
-
-# Create vectors with sex and space-use strategy
-Sex <- mSpUnk <- mSpPel <- NULL
-for (i in 1:nrow(CH)) {
-  Sex[i] <- ifelse(CR_data$sex[which(CR_data$ID_NR == rownames(CH)[i])][1] %in% "m", 1, 0) # 1 cub with unknown sex, assigned to females.
-  mSpUnk[i] <- ifelse(is.na(CR_data$ecot[which(CR_data$ID_NR == rownames(CH)[i])][1]), 1, 0)
-  mSpPel[i] <- ifelse(CR_data$ecot[which(CR_data$ID_NR == rownames(CH)[i])][1] %in% "O", 1, 0)
-}
-
-# Create a matrix with the day of capture
-DayCapture <- matrix(data = NA, nrow = nrow(CH), ncol = ncol(CH))
-for (k in 1:nrow(CR_data)) {
-  DayCapture[which(rownames(CH) == CR_data$ID_NR[k]), 
-             which(colnames(CH) == as.character(CR_data$year[k]))] <- CR_data$day_number[k]
-}
-DOY <- scale(DayCapture)
-DOY[is.na(DOY)] <- 0
-
-
-# Let's get the coordinates of the cubs
+# Compute the column number/year corresponding to the capture of a cub.
 col_cub <- NULL
 for (i in 1:nrow(CH)) {
   for (t in 1:ncol(CH)) {
@@ -499,20 +484,23 @@ for (i in 1:nrow(CH)) {
   }
 }
 
-# Function to create known states
-# We want ones where we know an individual is alive (between its first and last capture)
-# and NAs elsewhere. We also need to put an NA in the first capture.
-known.state.cjs <- function(ch) {
-  state <- ch
-  for (i in 1:dim(ch)[1]) {
-    n1 <- min(which(ch[i, ] == 1))
-    n2 <- max(which(ch[i, ] == 1))
-    state[i, n1:n2] <- 1
-    state[i, n1] <- NA
-  }
-  state[state == 0] <- NA
-  return(state)
+
+# Create vectors with sex and space-use strategy of all individuals
+Sex <- mSpUnk <- mSpPel <- NULL
+for (i in 1:nrow(CH)) {
+  Sex[i] <- ifelse(CR_data$sex[which(CR_data$ID_NR == rownames(CH)[i])][1] %in% "m", 1, 0) # 1 cub with unknown sex, assigned to females.
+  mSpUnk[i] <- ifelse(is.na(CR_data$ecot[which(CR_data$ID_NR == rownames(CH)[i])][1]), 1, 0)
+  mSpPel[i] <- ifelse(CR_data$ecot[which(CR_data$ID_NR == rownames(CH)[i])][1] %in% "O", 1, 0)
 }
+
+# Create a matrix with the day of capture for all individuals
+DayCapture <- matrix(data = NA, nrow = nrow(CH), ncol = ncol(CH))
+for (k in 1:nrow(CR_data)) {
+  DayCapture[which(rownames(CH) == CR_data$ID_NR[k]), 
+             which(colnames(CH) == as.character(CR_data$year[k]))] <- CR_data$day_number[k]
+}
+DOY <- scale(DayCapture)
+DOY[is.na(DOY)] <- 0
 
 
 # Bundle data
@@ -527,10 +515,11 @@ dat <- list(mL = mL,
             LS = LS,
             mG = mG,
             M = M,
-            y = CH,
-            z = known.state.cjs(CH))
+            ones = rep(1, times = nrow(CH)))
 
-my.constants <- list(n_year = n_year,
+my.constants <- list(CH = CH,
+                     freq = rep(1, times = nrow(CH)),
+                     n_year = n_year,
                      n_ind = nrow(CH),
                      # Length +++++++++++++++++++++++++++++++++++++
                      n_coef_mL = n_coef_mL,
@@ -566,16 +555,6 @@ my.constants <- list(n_year = n_year,
                      Age5_19 = Age5_19,
                      Age20 = Age20)
 
-# Initial values
-# Function to create initial values
-# We want NAs everywhere until the last capture
-ch.init <- function(ch, f) {
-  for (i in 1:dim(ch)[1]) {
-    last <- max(which(ch[i, ] == 1))
-    ch[i, 1:last] <- NA 
-  }
-  return(as.matrix(ch))
-}
 
 inits <- function() list(alpha = rnorm(n_coef_mL, mean = 0, sd = 1),
                          zeta = rnorm(n_cohort, mean = 0, sd = 1),
@@ -596,7 +575,6 @@ inits <- function() list(alpha = rnorm(n_coef_mL, mean = 0, sd = 1),
                          nu = rnorm(n_year, mean = 0, sd = 1),
                          sigma_epsilon = runif(1, min = 0, max = 5),
                          # CR model
-                         z = ch.init(CH, f),
                          theta = rnorm(n_coef_phi, mean = 0, sd = 1),
                          lambda = rnorm(n_coef_p, mean = 0, sd = 1),
                          omega = rnorm((n_year-1), mean = 0, sd = 1),
@@ -612,10 +590,10 @@ params <- c("alpha", "zeta", "sigma_zeta", "sigma_tau",
 
 ## 3. Run the model
 
-Running the model takes >15 hours. The output of the model (fit_PA_CR) is provided in the repository as a .RData file.
+The model takes >5 hours to run on a cluster. The output of the model (fit_PA_CR) is provided in the repository as a .RData file.
 
 ```{r}
-# start <- Sys.time() ; start  
+# start <- Sys.time() ; start
 # # Create R model
 # inits_values <- inits()
 # PA_CR_R <- nimbleModel(code = PA_CR,
@@ -634,18 +612,7 @@ Running the model takes >15 hours. The output of the model (fit_PA_CR) is provid
 # MCMC_conf <- configureMCMC(PA_CR_R,
 #                            monitors = params)
 # 
-# MCMC_conf$removeSamplers(c('theta[1]', 'theta[2]', 'theta[3]', 'theta[4]', 'theta[5]', 'theta[7]', 'theta[8]',
-#                            'theta[12]', 'theta[13]', 
-#                            'theta[14]', 'theta[15]', 'theta[16]', 'theta[17]','theta[18]', 'lambda[2]', 'lambda[3]', 'lambda[4]'))
-# 
-# # Add block sampler (Automated Factor Slice Sampler https://r-nimble.org/better-block-sampling-in-mcmc-with-the-automated-factor-slice-sampler#bib-turek17)
-# MCMC_conf$addSampler(target = c('theta[1]', 'theta[2]', 'theta[3]', 'theta[4]', 'theta[5]', 'theta[7]', 'theta[8]'), type = 'AF_slice')
-# MCMC_conf$addSampler(target = c('theta[12]', 'theta[13]'), type = 'AF_slice')
-# MCMC_conf$addSampler(target = c('theta[14]', 'theta[15]', 'theta[16]', 'theta[17]','theta[18]', 
-#                                 'lambda[2]', 'lambda[3]', 'lambda[4]'), type = 'AF_slice')
-# 
 # end <- Sys.time() ; end ; end - start
-# 
 # # Compile MCMC
 # MCMC_R <- buildMCMC(MCMC_conf)
 # end <- Sys.time() ; end ; end - start
@@ -654,10 +621,10 @@ Running the model takes >15 hours. The output of the model (fit_PA_CR) is provid
 # end <- Sys.time() ; end ; end - start
 # 
 # fit_PA_CR <- runMCMC(mcmc = MCMC_C,
-#                         nchains = 2,
-#                         niter = 40000,
+#                         nchains = 3,
+#                         niter = 25000,
 #                         nburnin = 10000,
-#                         thin = 15,
+#                         thin = 10,
 #                         inits = inits())
 # 
 # save(fit_PA_CR,
@@ -748,7 +715,7 @@ All Rhat are < 1.1
 
 ## 3. Caterpillar plots
 
-```{r}
+```{r, fig.height = 12, fig.length = 10}
 model_df <- data.frame(name = c("alpha[1]", "alpha[2]", "alpha[3]", "alpha[4]", "alpha[5]", "sigma_zeta",
                                 "sigma_tau",
                                 # Litter size
@@ -811,7 +778,7 @@ model_df <- data.frame(name = c("alpha[1]", "alpha[2]", "alpha[3]", "alpha[4]", 
 load("outputs/fit_PA_CR.RData")
 
 N <- dim(fit_PA_CR$samples$chain1)[1]
-res <- do.call(rbind, fit_PA_CR)[seq(1, 2*nrow(fit_PA_CR$chain1), by = 5), ]
+res <- do.call(rbind, fit_PA_CR)[seq(1, length(fit_PA_CR)*nrow(fit_PA_CR$chain1), by = 5), ]
 cols <- model_df$name
 
 caterpillar <- as.data.frame(res) %>%
@@ -841,7 +808,7 @@ ggplot(data = caterpillar,
 
 ```{r}
 ggplot(data = caterpillar %>% filter(submodel == "Litter size"),
-       aes(x = name , y = value, color = submodel)) +
+       aes(x = name , y = value)) +
   geom_hline(yintercept = 0, color = "black") +
   stat_summary(fun.data = get_mean_and_CI,
                fun.args = list(lower = 0.025, upper = 0.975),
@@ -855,12 +822,33 @@ ggplot(data = caterpillar %>% filter(submodel == "Litter size"),
   scale_x_discrete(limits = rev(caterpillar %>% filter(submodel == "Litter size") %>% distinct(name) %>% pull(name)),
                    labels = rev(caterpillar %>% filter(submodel == "Litter size") %>% distinct(covariate, name) %>% pull(covariate))) +
   labs(x = "", y = "", color = "submodel") +
-  coord_flip()
+  coord_flip() +
+  facet_wrap(.~submodel)
+```
+
+```{r}
+ggplot(data = caterpillar %>% filter(submodel == "Cub mass"),
+       aes(x = name , y = value)) +
+  geom_hline(yintercept = 0, color = "black") +
+  stat_summary(fun.data = get_mean_and_CI,
+               fun.args = list(lower = 0.025, upper = 0.975),
+               geom = "pointrange", size = 0.5) +
+  stat_summary(fun.data = get_mean_and_CI,
+               fun.args = list(lower = 0.055, upper = 0.945),
+               geom = "pointrange", size = 1.1, linewidth = 1.1) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_color_brewer(palette = "Set1") +
+  scale_x_discrete(limits = rev(caterpillar %>% filter(submodel == "Cub mass") %>% distinct(name) %>% pull(name)),
+                   labels = rev(caterpillar %>% filter(submodel == "Cub mass") %>% distinct(covariate, name) %>% pull(covariate))) +
+  labs(x = "", y = "", color = "submodel") +
+  coord_flip() +
+  facet_wrap(.~submodel)
 ```
 
 ```{r}
 ggplot(data = caterpillar %>% filter(submodel == "Cub survival"),
-       aes(x = name , y = value, color = submodel)) +
+       aes(x = name , y = value)) +
   geom_hline(yintercept = 0, color = "black") +
   stat_summary(fun.data = get_mean_and_CI,
                fun.args = list(lower = 0.025, upper = 0.975),
@@ -874,7 +862,8 @@ ggplot(data = caterpillar %>% filter(submodel == "Cub survival"),
   scale_x_discrete(limits = rev(caterpillar %>% filter(submodel == "Cub survival") %>% distinct(name) %>% pull(name)),
                    labels = rev(caterpillar %>% filter(submodel == "Cub survival") %>% distinct(covariate, name) %>% pull(covariate))) +
   labs(x = "", y = "", color = "submodel") +
-  coord_flip()
+  coord_flip() +
+  facet_wrap(.~submodel)
 ```
 
 
@@ -1399,12 +1388,25 @@ mean(diff)
 quantile(diff, probs = c(0.025, 0.975))
 get_probability_direction(prob_twins[, "middle-aged"] - prob_twins[, "old"])
 
+# diff prob triplets
+diff <- prob_triplets[, "middle-aged"] - prob_triplets[, "old"]
+mean(diff)
+quantile(diff, probs = c(0.025, 0.975))
+get_probability_direction(prob_triplets[, "middle-aged"] - prob_triplets[, "old"])
+
 
 # Young VS old ++++++++++++++++++++
+# diff prob twins
 diff <- prob_twins[, "young"] - prob_twins[, "old"]
 mean(diff)
 quantile(diff, probs = c(0.025, 0.975))
-get_probability_direction(prob_twins[, "middle-aged"] - prob_twins[, "old"])
+get_probability_direction(prob_twins[, "young"] - prob_twins[, "old"])
+
+# diff prob triplets
+diff <- prob_triplets[, "young"] - prob_triplets[, "old"]
+mean(diff)
+quantile(diff, probs = c(0.025, 0.975))
+get_probability_direction(prob_triplets[, "young"] - prob_triplets[, "old"])
 ```
 
 ```{r}
@@ -1748,7 +1750,7 @@ quantile(res[, "sigma_nu"]^2, probs = c(0.025, 0.975))
 ```{r}
 ## Ignoring maternal age ##
 # Here we compute cub masses for each litter size independently of maternal age.
-# Do to so, we average the posterior across maternal agr groups within each litter
+# Do to so, we average the posterior across maternal age groups within each litter
 # size, having weighted the posteriors by the proportion of females of a given age
 # for each litter sizes. We assume a sex ratio at unity.
 prop_age_litter_size_df <- read_csv("data/data_cub_PA_CR.csv",
