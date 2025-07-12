@@ -2,3 +2,13 @@
 .Rhistory
 .RData
 .Ruserdata
+
+outputs/diagnostic_fit_PA_CR.png
+outputs/figure 2. Litter size.png
+outputs/figure 3. cub mass.png
+outputs/figure 4. cub survival.png
+outputs/figure 6. surviving cubs by litter size.png
+outputs/fit_PA_CR_cub_mass_corrected.csv
+outputs/fit_PA_CR_cub_mass_corrected_for_plot_girth.csv
+outputs/fit_PA_CR_cub_mass_corrected_for_plot_length.csv
+outputs/predicted_surviving_cubs_by_litter_size_by_age.RData
